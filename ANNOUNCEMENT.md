@@ -1,4 +1,4 @@
-# Muse Bridge for Hubitat — initial release (v1.5.2)
+# Muse Bridge for Hubitat — v1.0.0
 
 **Your Hubitat, talking to your AI assistant.**
 
