@@ -209,6 +209,20 @@ def devicesPage() {
                 description: "If a speaker is set lower than this, announcements play at least this loud"
             input "restoreVolume", "bool", title: "Restore speaker volume after announcements",
                 defaultValue: true
+            def sDevs = allSpeechDevices()
+            if (sDevs) {
+                def rows = sDevs.collect { d ->
+                    def sup = deviceVolumeSupport(d)
+                    def note = (!sup.canSet) ? "no volume commands — announcements only" :
+                               (!sup.reports) ? "volume control, but no level reporting — restore unavailable" :
+                               "full volume support"
+                    "• <b>${d.displayName}</b> — ${note}"
+                }.join("<br>")
+                paragraph("<b>Speaker volume support:</b><br>${rows}")
+            } else {
+                paragraph("Select speech devices above and this will show which ones " +
+                    "support volume control and restore.")
+            }
         }
         section("Sirens") {
             input "alSirens", "capability.alarm", title: "Sirens / alarms", multiple: true, required: false, showFilter: true
@@ -804,6 +818,18 @@ def clampVolume(v) {
     if (n < 0) return 0
     if (n > 100) return 100
     return n
+}
+
+/** What volume features a speech device supports. Restore needs both. */
+def deviceVolumeSupport(d) {
+    def canSet = d.hasCommand("setVolume") || d.hasCommand("setLevel")
+    def reports = false
+    try {
+        reports = d.supportedAttributes?.any { it.name == "level" } ?: (d.currentValue("level") != null)
+    } catch (e) {
+        try { reports = d.currentValue("level") != null } catch (e2) { reports = false }
+    }
+    return [canSet: canSet, reports: reports]
 }
 
 def restoreDeviceVolume(data) {
@@ -1422,7 +1448,7 @@ def ruleSummary(rule) {
 // Device helpers
 // ============================================================================
 
-def appVersion() { return "1.4.0" }
+def appVersion() { return "1.4.1" }
 
 def logDebug(String msg) {
     if (settings.logDebug) log.debug "Muse Bridge: ${msg}"
