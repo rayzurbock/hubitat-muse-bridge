@@ -209,7 +209,7 @@ def devicesPage() {
                 description: "If a speaker is set lower than this, announcements play at least this loud"
             input "restoreVolume", "bool", title: "Restore speaker volume after announcements",
                 defaultValue: true
-            def sDevs = allSpeechDevices()
+            def sDevs = speechDevices()
             if (sDevs) {
                 def rows = sDevs.collect { d ->
                     def sup = deviceVolumeSupport(d)
