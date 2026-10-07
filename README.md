@@ -32,8 +32,12 @@ this project at work.
 
 1. In Hubitat, go to **Apps Code → New App**, paste the contents of
    `apps/muse-bridge.groovy`, and click **Save**.
-2. Still in Apps Code, open **Muse Bridge**, click **OAuth**, and enable it.
-   (The API needs an access token; without this step the token page stays empty.)
+2. Enable OAuth (the API needs an access token; without this step the token
+   page stays empty):
+   - Go to **Apps Code** in the left sidebar.
+   - Click **Muse Bridge** to open the code editor.
+   - Click the **⋮ three-dot menu** in the **top-right corner** of the editor.
+   - Choose **OAuth**, then click **Enable OAuth** in the popup.
 3. Go to **Apps → Add User App → Muse Bridge**.
 4. **Devices to expose** — open the master list and Select All (this
    authorizes the app to see your devices), then use **Choose exposed

@@ -119,7 +119,7 @@ def mainPage() {
                 description: "Low-battery and inactive-device push alerts")
             href(name: "apiHref", page: "apiPage",
                 title: "API Access",
-                description: state.accessToken ? "Endpoints and token ready" : "OAuth token missing — see page")
+                description: state.accessToken ? "Endpoints and token ready" : "⚠️ OAuth not enabled — tap here for setup steps")
             href(name: "linkHref", page: "linkPage",
                 title: "Link with Muse",
                 description: state.accessToken ? "Copy-paste setup message for your assistant" : "Needs OAuth first — see API Access")
@@ -640,9 +640,12 @@ def apiPage() {
     dynamicPage(name: "apiPage", title: "API Access", nextPage: "mainPage") {
         section() {
             if (!state.accessToken) {
-                paragraph("<b>OAuth is not enabled for this app.</b><br>" +
-                    "In <b>Apps Code</b>, open <b>Muse Bridge</b>, click <b>OAuth</b>, " +
-                    "enable it, then come back here. The token and URLs will appear below.")
+                paragraph("<b>OAuth is not enabled for this app — the API won't work without it.</b><br><br>" +
+                    "<b>1.</b> Go to <b>Apps Code</b> in the left sidebar.<br>" +
+                    "<b>2.</b> Click <b>Muse Bridge</b> to open the code editor.<br>" +
+                    "<b>3.</b> Click the <b>⋮ three-dot menu</b> in the <b>top-right corner</b> of the editor.<br>" +
+                    "<b>4.</b> Choose <b>OAuth</b>, then click <b>Enable OAuth</b> in the popup.<br>" +
+                    "<b>5.</b> Come back here — the token and URLs will appear below.")
             } else {
                 paragraph("Use these URLs with <b>?access_token=${state.accessToken}</b> appended. " +
                     "Keep the token secret — anyone with it can read and control your devices.")
