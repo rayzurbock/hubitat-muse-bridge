@@ -154,12 +154,13 @@ def mainPage() {
 def devicesPage() {
     dynamicPage(name: "devicesPage", title: "Devices Exposed to the API", nextPage: "mainPage") {
         section() {
-            paragraph("These devices are visible to the REST API and available as alert-rule triggers. " +
-                "Authorize devices with the master list, then choose which of them are exposed.")
+            paragraph("The app can only use devices you authorize below. By default every " +
+                "authorized device is exposed to the API and rules — open the picker " +
+                "to narrow it down.")
         }
         section("Authorize devices") {
-            paragraph("The app can only see devices you authorize here. Open the master list, " +
-                "Select All, Done — or pick individual devices.")
+            paragraph("<b>Step 1</b> — let the app see your devices. Open the master list, " +
+                "Select All, Done.")
             input "devMaster", "capability.*", title: "All devices (master list)", multiple: true, required: false, showFilter: true
         }
         section("Exposed devices") {
@@ -167,7 +168,7 @@ def devicesPage() {
             def total = exposureUniverse().size()
             href(name: "exposeHref", page: "exposePage",
                 title: "Choose exposed devices",
-                description: "${exposed} of ${total} authorized devices exposed — search, filter by type or recent activity")
+                description: "<b>Step 2 (optional)</b> — ${exposed} of ${total} authorized devices exposed; tap to uncheck ones you don't need")
         }
         section("Speech & announcements") {
             paragraph("Alert rules speak through these devices, using the <b>speak</b> command " +
@@ -213,23 +214,38 @@ def devicesPage() {
 }
 
 def exposePage() {
-    state.exposureMigrated = true
     ensureActivityCache()
-    def exposed = exposedDeviceIds().size()
-    def total = exposureUniverse().size()
+    if (state.exposureMigrated && !state.exposureSeeded) {
+        // Visitor of the pre-1.5.2 picker: preserve whatever they selected (possibly nothing).
+        state.exposureSeeded = true
+    }
+    if (!state.exposureSeeded) {
+        // First visit: check everything currently authorized, so the checklist
+        // matches reality from the start.
+        app.updateSetting("expDevices", (exposureUniverse()*.id*.toString()) as List)
+        state.exposureSeeded = true
+    }
+    def universeIds = (exposureUniverse()*.id*.toString()) as Set
+    def exposedIds = exposedDeviceIds()
+    def missing = universeIds - exposedIds
     dynamicPage(name: "exposePage", title: "Choose Exposed Devices", nextPage: "devicesPage") {
         section("Find devices") {
-            paragraph("Search, narrow by device type, and hide devices that haven't reported " +
-                "recently. Checked devices stay checked while you search — uncheck to remove. " +
-                "Activity labels show when each device last reported.")
+            paragraph("Filters only change what's <b>listed</b> — never your selection. " +
+                "Check devices to expose them to the API and rules; uncheck to remove them. " +
+                "Already-selected devices always appear at the top, even when a filter hides them. " +
+                "Labels show when each device last reported.")
             input "expSearch", "text", title: "Search by name", required: false, submitOnChange: true
             input "expCap", "enum", title: "Device type", required: false, submitOnChange: true,
                 options: exposureCapOptions(), description: "Narrow by capability"
             input "expActiveDays", "number",
-                title: "Only show devices active within the last N days (0 = show all)",
-                defaultValue: 30, required: true, range: "0..365", submitOnChange: true
+                title: "Hide devices quiet for longer than N days (0 = show all)",
+                defaultValue: 0, required: true, range: "0..365", submitOnChange: true,
+                description: "Opt-in: hide dead devices to make big lists manageable"
+            if (missing) paragraph("<b>${missing.size()} authorized device${missing.size() == 1 ? ' is' : 's are'} " +
+                "not exposed.</b> Find ${missing.size() == 1 ? 'it' : 'them'} below and check " +
+                "${missing.size() == 1 ? 'it' : 'them'} to include ${missing.size() == 1 ? 'it' : 'them'}.")
         }
-        section("Exposed devices (${exposed} of ${total})") {
+        section("Exposed devices (${exposedIds.size()} selected of ${universeIds.size()} authorized)") {
             input "expDevices", "enum", title: "Checked devices are exposed to the API and rules",
                 multiple: true, required: false, options: exposureOptions(), submitOnChange: true
         }
@@ -1646,7 +1662,7 @@ def ruleSummary(rule) {
 // Device helpers
 // ============================================================================
 
-def appVersion() { return "1.5.1" }
+def appVersion() { return "1.5.2" }
 
 def logDebug(String msg) {
     if (settings.logDebug) log.debug "Muse Bridge: ${msg}"
@@ -1681,17 +1697,13 @@ def exposureUniverse() {
     return all
 }
 
-/** The device IDs exposed to the API and rules (strings). */
+/** The device IDs exposed to the API and rules (strings).
+ *  Default: everything authorized. Opening the picker snapshots the current
+ *  list into settings.expDevices, after which the checklist is the truth. */
 def exposedDeviceIds() {
-    if (settings.expDevices != null) return (settings.expDevices*.toString()) as Set
-    if (state.exposureMigrated) return [] as Set
-    // Upgrade path: seed from the old per-capability pickers, else the master list.
-    def ids = [] as Set
-    legacyExposureKeys().each { k ->
-        settingDeviceList(k).each { d -> ids << d.id.toString() }
-    }
-    if (ids) return ids
-    return (settingDeviceList("devMaster")*.id*.toString()) as Set
+    if (state.exposureSeeded && settings.expDevices != null) return (settings.expDevices*.toString()) as Set
+    if (state.exposureSeeded) return [] as Set
+    return (exposureUniverse()*.id*.toString()) as Set
 }
 
 /** Devices the app can address anywhere (exposure universe + speech/siren/phone inputs). */
@@ -1764,7 +1776,7 @@ def exposureCapOptions() {
 def exposureCandidates() {
     def q = settings.expSearch?.toString()?.trim()?.toLowerCase()
     def cap = settings.expCap?.toString()
-    def days = (settings.expActiveDays != null ? settings.expActiveDays as int : 30)
+    def days = (settings.expActiveDays != null ? settings.expActiveDays as int : 0)
     return exposureUniverse().findAll { d ->
         if (q && !(d.displayName?.toLowerCase()?.contains(q))) return false
         if (cap) {
@@ -1782,11 +1794,11 @@ def exposureCandidates() {
 
 def exposureOptions() {
     def opts = [:]
-    // Currently-exposed devices always appear (checked), so they can be unchecked
-    // even when the filters hide them.
+    // Currently-selected devices always appear (checked), so they can be
+    // unchecked even when the filters hide them.
     exposedDeviceIds().each { id ->
         def d = allVisibleDevices().find { it.id.toString() == id }
-        if (d) opts[id] = "✓ ${d.displayName} ${activityLabel(d)}"
+        if (d) opts[id] = "${d.displayName} ${activityLabel(d)}"
     }
     exposureCandidates().each { d ->
         def id = d.id.toString()

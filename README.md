@@ -37,10 +37,9 @@ this project at work.
 3. Go to **Apps → Add User App → Muse Bridge**.
 4. **Devices to expose** — open the master list and Select All (this
    authorizes the app to see your devices), then use **Choose exposed
-   devices** to pick which ones the API and rules actually use. The picker
-   has text search, a device-type filter, and an "active within the last N
-   days" filter to hide dead devices (N is configurable, 0 shows all).
-   Upgrading from an older version keeps your previous selections.
+   devices** to uncheck any you don't need. The picker has text search, a
+   device-type filter, and an opt-in "hide devices quiet for N days" filter
+   for dead devices. Everything authorized is exposed by default.
 5. **Device health** (optional) — daily text-push alerts for low batteries
    (threshold configurable) and devices that have gone quiet (days
    configurable), each with a per-device ignore list. Health alerts are
