@@ -331,7 +331,28 @@ def initialize() {
         subscribe(location, "mode", "ruleEventHandler")
         runEvery5Minutes("periodicRuleEval")
     }
+    // unschedule() above wiped all pending timers: drop stale "pending" flags so
+    // evaluateAllRules() re-arms them cleanly instead of relying on recovery.
+    rules.each { rule ->
+        if (!rule.enabled) return
+        def st = ruleStateFor(rule.id)
+        if (st.pending) {
+            st.pending = false
+            st.pendingSince = null
+            saveRuleState(rule.id, st)
+        }
+    }
     evaluateAllRules("init")
+    // Re-schedule repeat announcements for rules that are still breached.
+    rules.each { rule ->
+        if (!rule.enabled) return
+        def st = ruleStateFor(rule.id)
+        if (st.breached && (rule.repeatMin as BigDecimal) > 0 &&
+            triggerConditionTrue(rule) && conditionsTrue(rule)) {
+            def secs = Math.max(30, ((rule.repeatMin as BigDecimal) * 60) as long)
+            runIn(secs, "ruleRepeat", [data: [ruleId: rule.id], overwrite: false])
+        }
+    }
     logDebug("initialized with ${allExposedDevices().size()} devices and ${rules.count { it.enabled }} enabled rules")
 }
 
@@ -351,6 +372,10 @@ def ensureToken() {
 // ============================================================================
 
 def subscribeRule(rule) {
+    if (!rule.attribute) {
+        log.warn "Muse Bridge: rule '${rule.name}' has no attribute, skipping subscriptions"
+        return
+    }
     def devs = triggerDevices(rule)
     if (!devs) {
         log.warn "Muse Bridge: rule '${rule.name}' has no matching trigger devices, skipping subscriptions"
@@ -543,6 +568,7 @@ def speakOnDevices(List ids, String text) {
 // --- rule condition helpers -------------------------------------------------
 
 def triggerConditionTrue(rule) {
+    if (!rule.attribute) return false
     def devs = triggerDevices(rule)
     if (!devs) return false
     return devs.any { d -> compareValues(d.currentValue(rule.attribute), rule.operator, rule.value) }
