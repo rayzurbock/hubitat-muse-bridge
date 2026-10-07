@@ -24,7 +24,7 @@ import groovy.json.JsonOutput
 definition(
     name: "Muse Bridge",
     namespace: "musebridge",
-    author: "Brian Lowrance",
+    author: "Rayzurbock",
     description: "REST API plus spoken alert-rule engine for Muse and other integrations.",
     category: "Integrations",
     iconUrl: "",
@@ -131,6 +131,12 @@ def devicesPage() {
         section() {
             paragraph("These devices are visible to the REST API and available as alert-rule triggers. " +
                 "A device selected under more than one capability is only exposed once.")
+        }
+        section("Bulk select") {
+            paragraph("Hubitat's per-capability pickers don't always offer Select All. " +
+                "Use this master list instead: open it, Select All, Done. " +
+                "The capability sections below are optional fine-tuning.")
+            input "devMaster", "capability.*", title: "All devices (master list)", multiple: true, required: false
         }
         section("Switches, dimmers & lights") {
             input "swSwitches", "capability.switch", title: "Switches", multiple: true, required: false
@@ -1132,7 +1138,8 @@ def logDebug(String msg) {
 }
 
 def deviceSettingNames() {
-    return ["swSwitches", "swLevels", "swColors",
+    return ["devMaster",
+            "swSwitches", "swLevels", "swColors",
             "swLocks", "swGarage", "swValves", "swShades", "swButtons",
             "seContact", "seMotion", "sePresence", "seAccel", "seTamper",
             "enTemp", "enHumidity", "enIllum", "enPower", "enEnergy", "enBattery",
