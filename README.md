@@ -59,12 +59,27 @@ To rotate the token, disable/re-enable OAuth in Apps Code or reinstall the app.
 
 ## Linking with Muse
 
-1. In the app, open **Link with Muse**.
-2. Set your monitoring preferences: how often the assistant polls the hub,
+Muse can't reach your hub until you hand it the connection details — and
+only you can do this step. The access token lives on your hub; no assistant
+can fetch it on your behalf.
+
+1. In Hubitat, go to **Apps → Muse Bridge**.
+2. Open the **Link with Muse** page.
+3. If it says "Enable OAuth first," go back to Installation step 2
+   (**Apps Code → ⋮ → OAuth → Enable OAuth**), then return here.
+4. Set your monitoring preferences: how often the assistant polls the hub,
    and after how many consecutive failed polls (within how many minutes)
    it should message you about an outage.
-3. Copy the pre-filled setup message and paste it to Muse in chat.
-4. Muse verifies with `GET /health` and starts monitoring.
+5. Copy the entire setup message — everything below the "Copy everything
+   below this line" heading. Your cloud API URL and access token are
+   already filled in.
+6. Paste it to Muse in chat and send. Muse verifies the link with
+   `GET /health` and starts monitoring.
+
+Keep the token private — anyone holding it can read and control your
+devices. Don't post the message publicly or forward it to anyone else. To
+rotate the token, disable and re-enable OAuth in Apps Code, then generate
+a fresh setup message.
 
 The generated message looks like this (yours is pre-filled with your real
 URLs, token, and preferences in the app):
@@ -256,6 +271,25 @@ its secure vault). Muse then:
 
 Because the rule engine lives on the hub, spoken alerts fire even if the
 assistant is unreachable.
+
+## Hub monitoring
+
+The `monitor/` directory holds a small Python poller for the assistant side:
+it checks `/health` on a schedule and reports outages, recoveries, and newly
+breached alert rules as JSON your assistant or scheduler can act on.
+
+```bash
+cd monitor
+python3 setup.py   # asks for everything it needs — base URL, token, thresholds
+python3 poll.py    # one check; schedule with cron (every 5 minutes works well)
+```
+
+Setup is interactive: it prompts for the cloud API base URL and access token
+(the token is typed invisibly and stored in `.token` with owner-only
+permissions), plus the outage thresholds. Nothing is hardcoded and no
+secrets are printed, logged, or committed — `config.json`, `.token`, and
+`state.json` are git-ignored. See `monitor/README.md` for the full field
+reference.
 
 ## Security notes
 
