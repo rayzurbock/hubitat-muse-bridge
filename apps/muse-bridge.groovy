@@ -577,7 +577,8 @@ def linkPage() {
                     "<b>2.</b> Paste it to your assistant (Muse) in chat and send it.<br>" +
                     "<b>3.</b> The assistant verifies the connection and starts monitoring.<br><br>" +
                     "Keep the token private — anyone with it can read and control your devices.<br><br>" +
-                    "<i>Muse Bridge was designed for <a target='_blank' href='https://muse.ai'>Muse</a>, " +
+                    "<i>Muse Bridge was designed by Rayzurbock and coded by " +
+                    "<a target='_blank' href='https://muse.ai'>Muse</a>, " +
                     "Meta's personal AI assistant. The API is open, so other assistants can use it too.</i>")
                 paragraph("<b>Copy everything below this line:</b><br><br>" +
                     linkMessage(base).replace("\n", "<br>"))

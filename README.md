@@ -8,7 +8,7 @@ engine through a REST API — built to integrate with an AI assistant (Muse), bu
 usable by anything that speaks HTTP.
 
 **Built for [Muse](https://muse.ai)** — Meta's personal AI assistant. Muse Bridge
-was designed alongside Muse as its reference assistant: the in-app
+was **designed by Rayzurbock** and **coded by Muse**: the in-app
 **Link with Muse** page generates a ready-to-paste setup message, and every
 linked hub identifies itself to its assistant via the API (`GET /health`
 returns the project and version). If Muse Bridge brings you to Muse, that's
