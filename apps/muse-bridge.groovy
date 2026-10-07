@@ -41,6 +41,7 @@ preferences {
     page(name: "linkPage", title: "Link with Muse")
     page(name: "exposePage", title: "Choose Exposed Devices")
     page(name: "healthPage", title: "Device Health")
+    page(name: "speakerPage", title: "Choose Speakers")
 }
 
 mappings {
@@ -170,10 +171,12 @@ def devicesPage() {
         }
         section("Speech & announcements") {
             paragraph("Alert rules speak through these devices, using the <b>speak</b> command " +
-                "when available and <b>playTextAndResume</b>/<b>playText</b> otherwise.")
-            input "spSpeech", "capability.speechSynthesis", title: "Speech synthesis devices", multiple: true, required: false, showFilter: true
-            input "spAudio", "capability.audioNotification", title: "Audio notification devices", multiple: true, required: false, showFilter: true
-            input "spMusic", "capability.musicPlayer", title: "Music players", multiple: true, required: false, showFilter: true
+                "when available and <b>playTextAndResume</b>/<b>playText</b> otherwise. " +
+                "Speakers are listed most-capable first — prefer ones with full volume " +
+                "support if you use announcement volumes.")
+            href(name: "speakerHref", page: "speakerPage",
+                title: "Choose speakers",
+                description: speakerDeviceIds() ? "${speakerDeviceIds().size()} speaker${speakerDeviceIds().size() == 1 ? '' : 's'} selected" : "Tap to choose speakers")
         }
         section("Announcement volume") {
             paragraph("Control how loud announcements play, regardless of what the " +
@@ -231,6 +234,68 @@ def exposePage() {
                 multiple: true, required: false, options: exposureOptions(), submitOnChange: true
         }
     }
+}
+
+def speakerPage() {
+    state.speakerMigrated = true
+    dynamicPage(name: "speakerPage", title: "Choose Speakers", nextPage: "devicesPage") {
+        section("Speakers") {
+            paragraph("Most capable first. <b>Full</b> = voice + volume + restore after " +
+                "announcements. <b>Voice + volume</b> = volume works but can't be restored. " +
+                "<b>Voice only</b> = announcements play, volume settings are ignored.")
+            input "spkFullOnly", "bool", title: "Only show fully-capable speakers",
+                defaultValue: false, submitOnChange: true,
+                description: "Hides voice-only and no-restore speakers from the list below"
+            input "spkDevices", "enum", title: "Speakers for announcements",
+                multiple: true, required: false, options: speakerOptions(), submitOnChange: true
+        }
+    }
+}
+
+// 3 = full (voice + volume + restore), 2 = voice + volume, 1 = voice only
+def speakerTier(d) {
+    def vol = deviceVolumeSupport(d)
+    if (vol.canSet && vol.reports) return 3
+    if (vol.canSet) return 2
+    return 1
+}
+
+def speakerTierLabel(d) {
+    switch (speakerTier(d)) {
+        case 3: return "full: voice + volume + restore"
+        case 2: return "voice + volume (no restore)"
+        default: return "voice only"
+    }
+}
+
+def speakerCandidates() {
+    def cands = allVisibleDevices().findAll { d ->
+        try {
+            d.hasCommand("speak") || d.hasCommand("playText") || d.hasCommand("playTextAndResume") ||
+            d.hasCapability("SpeechSynthesis") || d.hasCapability("AudioNotification") || d.hasCapability("MusicPlayer")
+        } catch (e) { false }
+    }.unique { it.id.toString() }
+    if (settings.spkFullOnly == true) cands = cands.findAll { speakerTier(it) == 3 }
+    return cands.sort { a, b ->
+        (speakerTier(b) <=> speakerTier(a)) ?: (a.displayName?.toLowerCase() <=> b.displayName?.toLowerCase())
+    }
+}
+
+def speakerOptions() {
+    return speakerCandidates().collectEntries { d ->
+        [(d.id.toString()): "${d.displayName} — ${speakerTierLabel(d)}"]
+    }
+}
+
+def speakerDeviceIds() {
+    if (settings.spkDevices != null) return (settings.spkDevices*.toString()) as Set
+    if (state.speakerMigrated) return [] as Set
+    // Upgrade path: seed from the old per-capability speaker pickers.
+    def ids = [] as Set
+    ["spSpeech", "spAudio", "spMusic"].each { k ->
+        settingDeviceList(k).each { d -> ids << d.id.toString() }
+    }
+    return ids
 }
 
 def healthPage() {
@@ -1575,7 +1640,7 @@ def ruleSummary(rule) {
 // Device helpers
 // ============================================================================
 
-def appVersion() { return "1.5.0" }
+def appVersion() { return "1.5.1" }
 
 def logDebug(String msg) {
     if (settings.logDebug) log.debug "Muse Bridge: ${msg}"
@@ -1736,12 +1801,8 @@ def getDeviceById(id) {
 }
 
 def speechDevices() {
-    def all = []
-    ["spSpeech", "spAudio", "spMusic"].each { n ->
-        def v = settings[n]
-        if (v) all.addAll(v instanceof List ? v : [v])
-    }
-    return all.unique { it.id }
+    def ids = speakerDeviceIds()
+    return allVisibleDevices().findAll { ids.contains(it.id.toString()) }
 }
 
 def deviceSummary(d) {
