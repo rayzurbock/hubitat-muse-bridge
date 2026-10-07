@@ -58,9 +58,32 @@ Each run prints one JSON object on stdout:
 
 Stay silent when there's nothing to report — no "all clear" noise.
 
+## Sending commands
+
+`hubctl.py` sends a device command and verifies the result as fast as
+possible — it checks the device state *immediately* after the command is
+accepted and re-polls about once per second until the expected state
+appears, instead of waiting a fixed delay up front:
+
+```bash
+python3 hubctl.py "Hall Dimmer" off
+# Hall Dimmer: off -> switch=off (confirmed in 1.1s)
+
+python3 hubctl.py "Kitchen Door Lock" unlock   # prompts for the command passcode
+python3 hubctl.py "Front Hall Light" on --json # machine-readable output
+```
+
+Devices resolve by id or case-insensitive name substring; ambiguous names
+list the matches instead of guessing. Expected states are inferred for
+`on`/`off`/`lock`/`unlock` and can be overridden with `--expect attr=value`.
+Security-sensitive commands (`unlock`, garage-door `open`, valve and siren
+control) prompt for the Muse Bridge command passcode when `--passcode`
+isn't given.
+
 ## Files
 
 - `poll.py` — the poller. No secrets inside; reads `config.json` + `.token`.
+- `hubctl.py` — send a command with fast verification (see above).
 - `setup.py` — interactive first-time setup.
 - `config.example.json` — documented example (copy, don't edit in place).
 - `config.json`, `.token`, `state.json` — created locally by setup/poller;
