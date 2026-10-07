@@ -55,6 +55,11 @@ kicks on and right back off.
 **Night mode reminder** — back door `contact` is `open` longer than 5 minutes,
 condition: mode is **Night**, time window 22:00–06:00.
 
+**Intrusion while secured** — front door `contact` is `open`, duration
+**0.1 minutes** (≈6 s), condition: HSM is **armedAway** (or mode **Away**),
+**URGENT** priority, channels: speech + push + Muse chat. Immediate,
+can't-miss announcement on every channel.
+
 ## API reference
 
 All endpoints accept `?access_token=…`. `POST`/`PUT` bodies are JSON.
@@ -73,6 +78,7 @@ Base URLs are shown on the app's **API Access** page (cloud and local).
 | GET | `/hsm` | Hubitat Safety Monitor status (`armedAway`, `armedHome`, `armedNight`, `disarmed`, …; null if HSM not installed) |
 | POST | `/hsm` | Arm/disarm HSM: `{"arm":"armAway"}` (`armAway`, `armHome`, `armNight`, `disarm`) — **passcode required** |
 | POST | `/speak` | Announce: `{"text":"Hello house","devices":["42"]}` (devices optional) |
+| POST | `/notify` | Push text to phones: `{"text":"Water detected","devices":["43"]}` (devices optional, defaults to all notification devices) |
 | GET | `/rules` | Rules with live state (pending / breached / last alert) |
 | POST | `/rules` | Create a rule (see schema below) |
 | GET | `/rules/:id` | One rule |
@@ -97,13 +103,18 @@ Base URLs are shown on the app's **API Access** page (cloud and local).
   "repeatMin": 5,
   "speakOnClear": true,
   "modes": ["Home", "Night"],
+  "hsmStates": ["armedAway", "armedHome", "armedNight"],
   "thermostatId": "7",
   "thermostatStates": ["cooling"],
   "timeFrom": "22:00",
   "timeTo": "06:00",
   "days": ["Monday", "Tuesday"],
   "message": "The %device% has been %value% for 10 minutes.",
-  "speechDeviceIds": ["42"]
+  "speechDeviceIds": ["42"],
+  "channels": ["speech", "push", "muse"],
+  "pushDeviceIds": ["43"],
+  "notifyClear": true,
+  "urgent": true
 }
 ```
 
@@ -113,7 +124,32 @@ Base URLs are shown on the app's **API Access** page (cloud and local).
 - `triggerDevices`: **device ids** (strings) — find them in `GET /devices`.
 - `timeFrom`/`timeTo`: `HH:mm` (24h); overnight windows wrap correctly.
 - Message tokens: `%device%` `%attribute%` `%value%` `%rule%`.
+- `channels`: any of `speech`, `push`, `muse` (default `["speech"]`).
+- `pushDeviceIds`: notification-device ids for push; blank = all phones.
+- `urgent`: prefix alerts so they stand out (`Urgent.` spoken, `🚨 URGENT:` on push).
 - All condition fields are optional; omitted = no restriction.
+
+## Notifications
+
+Each rule picks its announcement channels:
+
+- **🔊 Speech** — spoken on the house speakers via `speechSynthesis`,
+  `audioNotification`, or `musicPlayer` devices (uses `speak`, falls back to
+  `playText`). Pick specific speakers or leave blank for all.
+- **📱 Push** — text push via the Hubitat mobile app. Each phone/tablet with
+  the app is a separate *notification device*, so picking individual devices
+  targets individual people instead of the whole household.
+- **💬 Muse chat** — the hub can't reach the assistant directly, so this is a
+  flag: the assistant's polling loop reads breached rules from `GET /rules`
+  and messages you in chat. Urgent rules are flagged prominently.
+
+`notifyClear` sends a "cleared" notice through the same channels when the
+condition resolves. `urgent` prefixes every alert (`Urgent.` spoken,
+`🚨 URGENT:` on push, flagged in chat). Pair it with an HSM/mode condition —
+e.g. *contact `open` while HSM is armed* — for intrusion-style alerts.
+
+`POST /notify` sends an ad-hoc push without a rule:
+`{"text":"…","devices":["43"]}`.
 
 ### curl examples
 

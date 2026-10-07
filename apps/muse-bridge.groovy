@@ -68,6 +68,9 @@ mappings {
     path("/speak") {
         action: [POST: "apiSpeak"]
     }
+    path("/notify") {
+        action: [POST: "apiNotify"]
+    }
     path("/rules") {
         action: [GET: "apiListRules", POST: "apiCreateRule"]
     }
@@ -183,6 +186,12 @@ def devicesPage() {
         section("Sirens") {
             input "alSirens", "capability.alarm", title: "Sirens / alarms", multiple: true, required: false
         }
+        section("Phone / push notifications") {
+            paragraph("Each Hubitat mobile-app device is one phone or tablet. " +
+                "Rules can push text alerts to specific phones, so a text alert " +
+                "can go to one person instead of everyone.")
+            input "ntPhones", "capability.notification", title: "Notification devices", multiple: true, required: false
+        }
     }
 }
 
@@ -259,11 +268,14 @@ def rulePage(params) {
             input "${p}dur", "decimal", title: "Duration (minutes)", required: true, defaultValue: 10,
                 description: "Decimals allowed, e.g. 0.5 for 30 seconds"
             input "${p}repeat", "decimal", title: "Repeat the announcement every (minutes, 0 = once)", defaultValue: 0
-            input "${p}speakClear", "bool", title: "Announce when the condition clears", defaultValue: false
         }
         section("Conditions — the rule only arms when ALL of these hold (blank = always)") {
             input "${p}modes", "enum", title: "Location modes", multiple: true, required: false,
                 options: modeOptions()
+            input "${p}hsmStates", "enum", title: "Security monitor (HSM) is…", multiple: true, required: false,
+                options: ["armedAway": "Armed (away)", "armedHome": "Armed (home)",
+                          "armedNight": "Armed (night)", "disarmed": "Disarmed"],
+                description: "Requires Hubitat Safety Monitor; blank = any state"
             input "${p}tstat", "enum", title: "Thermostat", required: false,
                 options: thermostatOptions(),
                 description: "e.g. only alert about open windows while the A/C runs"
@@ -276,11 +288,25 @@ def rulePage(params) {
                 options: ["Monday": "Monday", "Tuesday": "Tuesday", "Wednesday": "Wednesday",
                           "Thursday": "Thursday", "Friday": "Friday", "Saturday": "Saturday", "Sunday": "Sunday"]
         }
-        section("Announcement") {
-            input "${p}msg", "text", title: "Spoken message (blank = automatic)", required: false,
-                description: "Tokens: %device% %attribute% %value% %rule%"
+        section("Notifications") {
+            paragraph("Choose how this rule announces. Text alerts (push) can target " +
+                "specific phones; spoken alerts use the house speakers; Muse chat " +
+                "messages arrive via the assistant's polling.")
+            input "${p}msg", "text", title: "Message (blank = automatic)", required: false,
+                description: "Tokens: %device% %attribute% %value% %rule%. Used for every channel."
+            input "${p}channels", "enum", title: "Send alerts via", multiple: true, required: true,
+                defaultValue: ["speech"],
+                options: ["speech": "🔊 Spoken on house speakers",
+                          "push"  : "📱 Push to phones (Hubitat app)",
+                          "muse"  : "💬 Message in Muse chat"]
             input "${p}speech", "enum", title: "Speak on (blank = all speech devices)",
                 multiple: true, required: false, options: speechOptions()
+            input "${p}pushDevs", "enum", title: "Push to (blank = all phones)",
+                multiple: true, required: false, options: pushOptions(),
+                description: "Each phone is a separate device — pick who gets the text"
+            input "${p}notifyClear", "bool", title: "Also notify when the condition clears", defaultValue: false
+            input "${p}urgent", "bool", title: "URGENT priority", defaultValue: false,
+                description: "Alerts are prefixed so they stand out on every channel"
         }
         section("Status") {
             paragraph(ruleStatusText(rid, st))
@@ -500,7 +526,7 @@ def evaluateRule(rule, String reason) {
         if (st.breached) {
             st.breached = false
             log.info "Muse Bridge: rule '${rule.name}' cleared"
-            if (rule.speakOnClear) speakForRule(rule, "Cleared: ${rule.name}.")
+            if (rule.notifyClear) notifyRule(rule, "Cleared: ${rule.name}.")
         }
         saveRuleState(rule.id, st)
     }
@@ -553,7 +579,47 @@ def fireAlert(rule, String reasonDetail) {
         .replace("%attribute%", rule.attribute ?: "")
         .replace("%value%", dev ? "${dev.currentValue(rule.attribute)}" : "")
     log.warn "Muse Bridge ALERT [${rule.name}]: ${msg} (${reasonDetail})"
-    speakForRule(rule, msg)
+    notifyRule(rule, msg)
+}
+
+/**
+ * Send a rule notification through every channel the rule selected:
+ *  speech — spoken on the house speakers (local, immediate)
+ *  push   — text push to the selected phones via the Hubitat mobile app
+ *  muse   — nothing the hub can do directly; the assistant's polling loop
+ *           sees the breach in GET /rules and messages the user in chat.
+ */
+def notifyRule(rule, String text) {
+    def channels = rule.channels ?: ["speech"]
+    def urgent = rule.urgent == true
+    if ("speech" in channels) speakForRule(rule, urgent ? "Urgent. ${text}" : text)
+    if ("push" in channels) pushForRule(rule, urgent ? "🚨 URGENT: ${text}" : text)
+    if ("muse" in channels) log.info "Muse Bridge [muse channel${urgent ? ' URGENT' : ''}] ${rule.name}: ${text}"
+}
+
+def pushForRule(rule, String text) {
+    def ids = rule.pushDeviceIds ?: defaultPushDeviceIds()
+    if (!ids) {
+        log.warn "Muse Bridge: no notification devices configured, cannot push: ${text}"
+        return
+    }
+    ids.each { id ->
+        def d = getDeviceById(id)
+        if (!d) {
+            log.warn "Muse Bridge: notification device id ${id} not found"
+            return
+        }
+        try {
+            if (d.hasCommand("deviceNotification")) {
+                d.deviceNotification(text)
+                logDebug("pushed to ${d.displayName}: ${text}")
+            } else {
+                log.warn "Muse Bridge: ${d.displayName} has no deviceNotification command"
+            }
+        } catch (e) {
+            log.warn "Muse Bridge: push to ${d.displayName} failed: ${e.message}"
+        }
+    }
 }
 
 def speakForRule(rule, String text) {
@@ -598,6 +664,10 @@ def triggerConditionTrue(rule) {
 
 def conditionsTrue(rule) {
     if (rule.modes && !(location.mode in rule.modes)) return false
+    if (rule.hsmStates) {
+        def hs = hsmStatus()
+        if (!(hs in rule.hsmStates)) return false
+    }
     if (rule.thermostatId) {
         def t = getDeviceById(rule.thermostatId)
         if (!t) {
@@ -724,8 +794,8 @@ def syncRuleFromSettings(String rid) {
         durationMin    : (settings["${p}dur"] ?: 10) as BigDecimal,
         alertWhen      : settings["${p}alertWhen"]?.toString() ?: "staysLongerThan",
         repeatMin      : (settings["${p}repeat"] ?: 0) as BigDecimal,
-        speakOnClear   : settings["${p}speakClear"] == true,
         modes          : (settings["${p}modes"] ?: []).collect { it.toString() },
+        hsmStates      : (settings["${p}hsmStates"] ?: []).collect { it.toString() },
         thermostatId   : settings["${p}tstat"]?.toString(),
         thermostatStates: (settings["${p}tstatStates"] ?: []).collect { it.toString() },
         timeFrom       : settings["${p}timeFrom"]?.toString(),
@@ -733,6 +803,10 @@ def syncRuleFromSettings(String rid) {
         days           : (settings["${p}days"] ?: []).collect { it.toString() },
         message        : settings["${p}msg"]?.toString()?.trim() ?: null,
         speechDeviceIds: (settings["${p}speech"] ?: []).collect { it.toString() },
+        channels       : (settings["${p}channels"] ?: ["speech"]).collect { it.toString() },
+        pushDeviceIds  : (settings["${p}pushDevs"] ?: []).collect { it.toString() },
+        notifyClear    : settings["${p}notifyClear"] == true,
+        urgent         : settings["${p}urgent"] == true,
         updatedAt      : now()
     ]
     def rules = getRules()
@@ -966,6 +1040,25 @@ def apiSpeak() {
     renderJson([ok: true, devices: ids.size(), text: text])
 }
 
+def apiNotify() {
+    if (!requireAuth()) return
+    def body = request.JSON ?: [:]
+    def text = (body.text ?: params.text)?.toString()?.trim()
+    if (!text) { renderJson([error: "missing 'text'"], 400); return }
+    def ids = (body.devices instanceof List ? body.devices : [])*.toString()
+    if (!ids) ids = defaultPushDeviceIds()
+    if (!ids) { renderJson([error: "no notification devices configured"], 400); return }
+    def sent = 0
+    ids.each { id ->
+        def d = getDeviceById(id)
+        if (d?.hasCommand("deviceNotification")) {
+            try { d.deviceNotification(text); sent++ }
+            catch (e) { log.warn "Muse Bridge API: push to ${d.displayName} failed: ${e.message}" }
+        }
+    }
+    renderJson([ok: true, devices: sent, text: text])
+}
+
 def apiListRules() {
     if (!requireAuth()) return
     renderJson([rules: getRules().collect { ruleSummary(it) }])
@@ -1046,7 +1139,7 @@ def apiTestRule() {
     if (!rule) { renderJson([error: "rule not found: ${params.id}"], 404); return }
     def msg = rule.message?.replace("%rule%", rule.name ?: "")?.replace("%device%", "test device")
         ?.replace("%attribute%", rule.attribute ?: "")?.replace("%value%", rule.value ?: "") ?: "Test announcement for rule ${rule.name}."
-    speakForRule(rule, msg)
+    notifyRule(rule, msg)
     renderJson([ok: true, id: rule.id, text: msg])
 }
 
@@ -1069,6 +1162,12 @@ def buildRuleFromApi(String rid, Map body) {
     def modes = (body.modes instanceof List ? body.modes : [])*.toString()
     def badModes = modes.findAll { !(it in location.modes*.name) }
     if (badModes) return [null, "unknown modes: ${badModes}"]
+    def hsmStates = (body.hsmStates instanceof List ? body.hsmStates : [])*.toString()
+    def badHsm = hsmStates.findAll { !(it in ["armedAway", "armedHome", "armedNight", "disarmed"]) }
+    if (badHsm) return [null, "bad hsmStates: ${badHsm} (use armedAway, armedHome, armedNight, disarmed)"]
+    def channels = (body.channels instanceof List ? body.channels : ["speech"])*.toString()
+    def badChannels = channels.findAll { !(it in ["speech", "push", "muse"]) }
+    if (badChannels) return [null, "bad channels: ${badChannels} (use speech, push, muse)"]
     def rule = [
         id              : rid,
         name            : name,
@@ -1080,8 +1179,8 @@ def buildRuleFromApi(String rid, Map body) {
         durationMin     : (body.durationMin ?: 10) as BigDecimal,
         alertWhen       : alertWhen,
         repeatMin       : (body.repeatMin ?: 0) as BigDecimal,
-        speakOnClear    : body.speakOnClear == true,
         modes           : modes,
+        hsmStates       : hsmStates,
         thermostatId    : tstatId,
         thermostatStates: (body.thermostatStates instanceof List ? body.thermostatStates : [])*.toString(),
         timeFrom        : body.timeFrom?.toString(),
@@ -1089,6 +1188,10 @@ def buildRuleFromApi(String rid, Map body) {
         days            : (body.days instanceof List ? body.days : [])*.toString(),
         message         : body.message?.toString()?.trim() ?: null,
         speechDeviceIds : (body.speechDeviceIds instanceof List ? body.speechDeviceIds : [])*.toString(),
+        channels        : channels,
+        pushDeviceIds   : (body.pushDeviceIds instanceof List ? body.pushDeviceIds : [])*.toString(),
+        notifyClear     : body.notifyClear == true,
+        urgent          : body.urgent == true,
         createdAt       : now(),
         updatedAt       : now()
     ]
@@ -1111,6 +1214,7 @@ def ruleSummary(rule) {
         durationMin   : rule.durationMin,
         alertWhen     : rule.alertWhen,
         modes         : rule.modes,
+        hsmStates     : rule.hsmStates,
         thermostatId  : rule.thermostatId,
         thermostatStates: rule.thermostatStates,
         timeFrom      : rule.timeFrom,
@@ -1118,7 +1222,13 @@ def ruleSummary(rule) {
         days          : rule.days,
         message       : rule.message,
         repeatMin     : rule.repeatMin,
-        speakOnClear  : rule.speakOnClear,
+        channels      : rule.channels ?: ["speech"],
+        pushDevices   : (rule.pushDeviceIds ?: []).collect { pid ->
+            def pd = getDeviceById(pid)
+            [id: pid, name: pd?.displayName]
+        },
+        notifyClear   : rule.notifyClear == true,
+        urgent        : rule.urgent == true,
         state         : [
             pending    : st.pending,
             breached   : st.breached,
@@ -1131,7 +1241,7 @@ def ruleSummary(rule) {
 // Device helpers
 // ============================================================================
 
-def appVersion() { return "1.1.0" }
+def appVersion() { return "1.2.0" }
 
 def logDebug(String msg) {
     if (settings.logDebug) log.debug "Muse Bridge: ${msg}"
@@ -1146,7 +1256,8 @@ def deviceSettingNames() {
             "saWater", "saSmoke", "saCO",
             "clThermostats",
             "spSpeech", "spAudio", "spMusic",
-            "alSirens"]
+            "alSirens",
+            "ntPhones"]
 }
 
 def allExposedDevices() {
@@ -1260,4 +1371,18 @@ def thermostatOptions() {
 
 def speechOptions() {
     return speechDevices().sort { it.displayName }.collectEntries { [(it.id.toString()): it.displayName] }
+}
+
+def pushDevices() {
+    def v = settings.ntPhones
+    def all = v ? (v instanceof List ? v : [v]) : []
+    return all.unique { it.id }
+}
+
+def defaultPushDeviceIds() {
+    return pushDevices().collect { it.id.toString() }
+}
+
+def pushOptions() {
+    return pushDevices().sort { it.displayName }.collectEntries { [(it.id.toString()): it.displayName] }
 }
