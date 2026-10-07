@@ -1,7 +1,7 @@
 /**
  *  Muse Bridge for Hubitat
  *
- *  Copyright (c) 2026 Brian Lowrance
+ *  Copyright (c) 2026 Rayzurbock (Brian S. Lowrance)
  *  Licensed under the MIT License. See LICENSE file for details.
  *
  *  Exposes selected devices, location modes, and a spoken alert-rule engine
