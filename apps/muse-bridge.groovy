@@ -39,6 +39,8 @@ preferences {
     page(name: "rulePage", title: "Alert Rule")
     page(name: "apiPage", title: "API Access")
     page(name: "linkPage", title: "Link with Muse")
+    page(name: "exposePage", title: "Choose Exposed Devices")
+    page(name: "healthPage", title: "Device Health")
 }
 
 mappings {
@@ -111,6 +113,9 @@ def mainPage() {
             href(name: "rulesHref", page: "rulesPage",
                 title: "Alert rules",
                 description: rules ? "${rules.size()} rule${rules.size() == 1 ? '' : 's'} (${breached} breached)" : "Tap to create alert rules")
+            href(name: "healthHref", page: "healthPage",
+                title: "Device health",
+                description: "Low-battery and inactive-device push alerts")
             href(name: "apiHref", page: "apiPage",
                 title: "API Access",
                 description: state.accessToken ? "Endpoints and token ready" : "OAuth token missing — see page")
@@ -149,48 +154,19 @@ def devicesPage() {
     dynamicPage(name: "devicesPage", title: "Devices Exposed to the API", nextPage: "mainPage") {
         section() {
             paragraph("These devices are visible to the REST API and available as alert-rule triggers. " +
-                "A device selected under more than one capability is only exposed once.")
+                "Authorize devices with the master list, then choose which of them are exposed.")
         }
-        section("Bulk select") {
-            paragraph("Hubitat's per-capability pickers don't always offer Select All. " +
-                "Use this master list instead: open it, Select All, Done. " +
-                "The capability sections below are optional fine-tuning.")
+        section("Authorize devices") {
+            paragraph("The app can only see devices you authorize here. Open the master list, " +
+                "Select All, Done — or pick individual devices.")
             input "devMaster", "capability.*", title: "All devices (master list)", multiple: true, required: false, showFilter: true
         }
-        section("Switches, dimmers & lights") {
-            input "swSwitches", "capability.switch", title: "Switches", multiple: true, required: false, showFilter: true
-            input "swLevels", "capability.switchLevel", title: "Dimmers / level controls", multiple: true, required: false, showFilter: true
-            input "swColors", "capability.colorControl", title: "Color lights", multiple: true, required: false, showFilter: true
-        }
-        section("Locks, doors, valves, shades & buttons") {
-            input "swLocks", "capability.lock", title: "Locks", multiple: true, required: false, showFilter: true
-            input "swGarage", "capability.garageDoorControl", title: "Garage doors", multiple: true, required: false, showFilter: true
-            input "swValves", "capability.valve", title: "Valves", multiple: true, required: false, showFilter: true
-            input "swShades", "capability.windowShade", title: "Shades / blinds", multiple: true, required: false, showFilter: true
-            input "swButtons", "capability.button", title: "Buttons", multiple: true, required: false, showFilter: true
-        }
-        section("Contact, motion & presence") {
-            input "seContact", "capability.contactSensor", title: "Contact sensors", multiple: true, required: false, showFilter: true
-            input "seMotion", "capability.motionSensor", title: "Motion sensors", multiple: true, required: false, showFilter: true
-            input "sePresence", "capability.presenceSensor", title: "Presence sensors", multiple: true, required: false, showFilter: true
-            input "seAccel", "capability.accelerationSensor", title: "Acceleration sensors", multiple: true, required: false, showFilter: true
-            input "seTamper", "capability.tamperAlert", title: "Tamper sensors", multiple: true, required: false, showFilter: true
-        }
-        section("Environmental") {
-            input "enTemp", "capability.temperatureMeasurement", title: "Temperature sensors", multiple: true, required: false, showFilter: true
-            input "enHumidity", "capability.relativeHumidityMeasurement", title: "Humidity sensors", multiple: true, required: false, showFilter: true
-            input "enIllum", "capability.illuminanceMeasurement", title: "Illuminance sensors", multiple: true, required: false, showFilter: true
-            input "enPower", "capability.powerMeter", title: "Power meters", multiple: true, required: false, showFilter: true
-            input "enEnergy", "capability.energyMeter", title: "Energy meters", multiple: true, required: false, showFilter: true
-            input "enBattery", "capability.battery", title: "Battery devices", multiple: true, required: false, showFilter: true
-        }
-        section("Safety") {
-            input "saWater", "capability.waterSensor", title: "Water sensors", multiple: true, required: false, showFilter: true
-            input "saSmoke", "capability.smokeDetector", title: "Smoke detectors", multiple: true, required: false, showFilter: true
-            input "saCO", "capability.carbonMonoxideDetector", title: "Carbon monoxide detectors", multiple: true, required: false, showFilter: true
-        }
-        section("Climate") {
-            input "clThermostats", "capability.thermostat", title: "Thermostats", multiple: true, required: false, showFilter: true
+        section("Exposed devices") {
+            def exposed = exposedDeviceIds().size()
+            def total = exposureUniverse().size()
+            href(name: "exposeHref", page: "exposePage",
+                title: "Choose exposed devices",
+                description: "${exposed} of ${total} authorized devices exposed — search, filter by type or recent activity")
         }
         section("Speech & announcements") {
             paragraph("Alert rules speak through these devices, using the <b>speak</b> command " +
@@ -224,9 +200,6 @@ def devicesPage() {
                     "support volume control and restore.")
             }
         }
-        section("Sirens") {
-            input "alSirens", "capability.alarm", title: "Sirens / alarms", multiple: true, required: false, showFilter: true
-        }
         section("Phone / push notifications") {
             paragraph("Each Hubitat mobile-app device is one phone or tablet. " +
                 "Rules can push text alerts to specific phones, so a text alert " +
@@ -234,6 +207,159 @@ def devicesPage() {
             input "ntPhones", "capability.notification", title: "Notification devices", multiple: true, required: false, showFilter: true
         }
     }
+}
+
+def exposePage() {
+    state.exposureMigrated = true
+    ensureActivityCache()
+    def exposed = exposedDeviceIds().size()
+    def total = exposureUniverse().size()
+    dynamicPage(name: "exposePage", title: "Choose Exposed Devices", nextPage: "devicesPage") {
+        section("Find devices") {
+            paragraph("Search, narrow by device type, and hide devices that haven't reported " +
+                "recently. Checked devices stay checked while you search — uncheck to remove. " +
+                "Activity labels show when each device last reported.")
+            input "expSearch", "text", title: "Search by name", required: false, submitOnChange: true
+            input "expCap", "enum", title: "Device type", required: false, submitOnChange: true,
+                options: exposureCapOptions(), description: "Narrow by capability"
+            input "expActiveDays", "number",
+                title: "Only show devices active within the last N days (0 = show all)",
+                defaultValue: 30, required: true, range: "0..365", submitOnChange: true
+        }
+        section("Exposed devices (${exposed} of ${total})") {
+            input "expDevices", "enum", title: "Checked devices are exposed to the API and rules",
+                multiple: true, required: false, options: exposureOptions(), submitOnChange: true
+        }
+    }
+}
+
+def healthPage() {
+    ensureActivityCache()
+    dynamicPage(name: "healthPage", title: "Device Health", nextPage: "mainPage") {
+        section("Low battery alerts") {
+            paragraph("Warn when a device's battery runs low. Battery-powered devices " +
+                "that never report a battery level are skipped.")
+            input "healthBattery", "bool", title: "Notify when batteries run low",
+                defaultValue: true, submitOnChange: true
+            if (settings.healthBattery != false) {
+                input "healthBatteryThreshold", "number", title: "Warn when battery is at or below (%)",
+                    defaultValue: 20, required: true, range: "1..100"
+                input "healthBatteryIgnore", "enum", title: "Ignore these devices",
+                    multiple: true, required: false, options: deviceOptions(),
+                    description: "Checked devices never trigger battery alerts"
+            }
+        }
+        section("Inactive device alerts") {
+            paragraph("Warn when a device goes quiet — no events at all, not just " +
+                "no state changes.")
+            input "healthInactive", "bool", title: "Notify when devices go quiet",
+                defaultValue: true, submitOnChange: true
+            if (settings.healthInactive != false) {
+                input "healthInactiveDays", "number", title: "Warn when quiet for N days",
+                    defaultValue: 7, required: true, range: "1..365"
+                input "healthInactiveIgnore", "enum", title: "Ignore these devices",
+                    multiple: true, required: false, options: deviceOptions(),
+                    description: "Checked devices never trigger inactivity alerts"
+            }
+        }
+        section("Delivery") {
+            paragraph("Health alerts are <b>text push notifications</b> to your Hubitat mobile " +
+                "app devices — one summary per day listing everything needing attention. " +
+                "They never play on speakers.")
+            input "healthTime", "time", title: "Run the health check daily at",
+                required: false, description: "Leave blank for 9:00 AM"
+            def problems = healthProblems()
+            paragraph(problems ?
+                "<b>Right now:</b><br>• " + problems.join("<br>• ") :
+                "<b>Right now:</b> all clear.")
+        }
+    }
+}
+
+// --- device health engine -----------------------------------------------------
+
+def healthProblems() {
+    ensureActivityCache()
+    def problems = []
+    if (settings.healthBattery != false) {
+        def threshold = (settings.healthBatteryThreshold != null ? settings.healthBatteryThreshold as int : 20)
+        def ignore = (settings.healthBatteryIgnore ?: [])*.toString()
+        allExposedDevices().each { d ->
+            if (ignore.contains(d.id.toString())) return
+            try {
+                if (!d.hasAttribute("battery")) return
+                def v = d.currentValue("battery")
+                if (v == null) return
+                def n = v.toString().isNumber() ? (v as BigDecimal) : null
+                if (n != null && n <= threshold) problems << "${d.displayName}: battery ${n.intValue()}%"
+            } catch (e) {
+                logDebug("battery check failed for ${d.displayName}: ${e.message}")
+            }
+        }
+    }
+    if (settings.healthInactive != false) {
+        def days = (settings.healthInactiveDays != null ? settings.healthInactiveDays as int : 7)
+        def ignore = (settings.healthInactiveIgnore ?: [])*.toString()
+        allExposedDevices().each { d ->
+            if (ignore.contains(d.id.toString())) return
+            def inactive = deviceInactiveDays(d)
+            if (inactive == null) problems << "${d.displayName}: never reported any activity"
+            else if (inactive >= days) problems << "${d.displayName}: no activity for ${inactive} days"
+        }
+    }
+    return problems
+}
+
+def deviceHealthCheck() {
+    def problems = healthProblems()
+    if (!problems) {
+        logDebug("device health check: all clear")
+        return
+    }
+    log.info "Muse Bridge device health: ${problems.size()} issue(s): ${problems.join('; ')}"
+    def phones = settingDeviceList("ntPhones")
+    if (!phones) {
+        log.warn "Muse Bridge: health check found problems but no notification devices are configured"
+        return
+    }
+    // Split into ~200-char chunks so long lists survive push limits.
+    def chunks = []
+    def current = ""
+    problems.each { p ->
+        def add = (current ? "; " : "") + p
+        if ((current + add).length() > 200 && current) {
+            chunks << current
+            current = p
+        } else {
+            current += add
+        }
+    }
+    if (current) chunks << current
+    phones.each { ph ->
+        chunks.each { c ->
+            try { ph.deviceNotification("Muse Bridge health: ${c}") }
+            catch (e) { log.warn "Muse Bridge: health push failed: ${e.message}" }
+        }
+    }
+}
+
+def scheduleHealthCheck() {
+    unschedule("deviceHealthCheck")
+    if (settings.healthBattery == false && settings.healthInactive == false) return
+    def hour = 9
+    def minute = 0
+    try {
+        if (settings.healthTime) {
+            def cal = Calendar.getInstance()
+            cal.setTime(settings.healthTime as Date)
+            hour = cal.get(Calendar.HOUR_OF_DAY)
+            minute = cal.get(Calendar.MINUTE)
+        }
+    } catch (e) {
+        log.warn "Muse Bridge: bad health check time, using 09:00"
+    }
+    schedule("0 ${minute} ${hour} * * ?", "deviceHealthCheck")
+    logDebug("device health check scheduled daily at ${String.format('%02d', hour)}:${String.format('%02d', minute)}")
 }
 
 def rulesPage(params) {
@@ -475,6 +601,7 @@ def uninstalled() {
 def initialize() {
     unsubscribe()
     unschedule()
+    scheduleHealthCheck()
     state.ruleState = state.ruleState ?: [:]
     def rules = getRules()
     rules.each { rule ->
@@ -1448,38 +1575,164 @@ def ruleSummary(rule) {
 // Device helpers
 // ============================================================================
 
-def appVersion() { return "1.4.1" }
+def appVersion() { return "1.5.0" }
 
 def logDebug(String msg) {
     if (settings.logDebug) log.debug "Muse Bridge: ${msg}"
 }
 
-def deviceSettingNames() {
-    return ["devMaster",
-            "swSwitches", "swLevels", "swColors",
+// Setting keys of the pre-1.5.0 per-capability pickers. Kept for upgrade
+// migration: their selections seed the exposure picker below.
+def legacyExposureKeys() {
+    return ["swSwitches", "swLevels", "swColors",
             "swLocks", "swGarage", "swValves", "swShades", "swButtons",
             "seContact", "seMotion", "sePresence", "seAccel", "seTamper",
             "enTemp", "enHumidity", "enIllum", "enPower", "enEnergy", "enBattery",
             "saWater", "saSmoke", "saCO",
             "clThermostats",
-            "spSpeech", "spAudio", "spMusic",
-            "alSirens",
-            "ntPhones"]
+            "alSirens"]
+}
+
+def settingDeviceList(String name) {
+    def v = settings[name]
+    return v instanceof List ? v : (v ? [v] : [])
+}
+
+/** Every device the app is allowed to see: master list + legacy picker selections. */
+def exposureUniverse() {
+    def seen = [] as Set
+    def all = []
+    (["devMaster"] + legacyExposureKeys()).each { k ->
+        settingDeviceList(k).each { d ->
+            if (d && seen.add(d.id.toString())) all << d
+        }
+    }
+    return all
+}
+
+/** The device IDs exposed to the API and rules (strings). */
+def exposedDeviceIds() {
+    if (settings.expDevices != null) return (settings.expDevices*.toString()) as Set
+    if (state.exposureMigrated) return [] as Set
+    // Upgrade path: seed from the old per-capability pickers, else the master list.
+    def ids = [] as Set
+    legacyExposureKeys().each { k ->
+        settingDeviceList(k).each { d -> ids << d.id.toString() }
+    }
+    if (ids) return ids
+    return (settingDeviceList("devMaster")*.id*.toString()) as Set
+}
+
+/** Devices the app can address anywhere (exposure universe + speech/siren/phone inputs). */
+def allVisibleDevices() {
+    def seen = [] as Set
+    def all = []
+    (["devMaster"] + legacyExposureKeys() +
+     ["spSpeech", "spAudio", "spMusic", "alSirens", "ntPhones"]).each { k ->
+        settingDeviceList(k).each { d ->
+            if (d && seen.add(d.id.toString())) all << d
+        }
+    }
+    return all
+}
+
+// --- device activity (last-event tracking, cached) ---------------------------
+
+def ensureActivityCache() {
+    if (!(state.activityCache instanceof Map)) state.activityCache = [:]
+    // Refresh at most every 6 hours; lookups below repopulate lazily.
+    if (!state.activityCacheAt || now() - (state.activityCacheAt as Long) > 6 * 3600 * 1000) {
+        state.activityCache = [:]
+        state.activityCacheAt = now()
+    }
+}
+
+/** Epoch ms of the device's most recent event (within the last year), or null. */
+def deviceLastEventMs(d) {
+    if (!(state.activityCache instanceof Map)) state.activityCache = [:]
+    def key = d.id.toString()
+    if (state.activityCache.containsKey(key)) return state.activityCache[key]
+    def ts = null
+    try {
+        def yearAgo = new Date(now() - 365L * 86400000L)
+        def evts = d.eventsSince(yearAgo, [max: 1])
+        def latest = evts?.max { it?.date?.time ?: 0 }
+        ts = latest?.date?.time
+    } catch (e) {
+        logDebug("activity lookup failed for ${d.displayName}: ${e.message}")
+    }
+    state.activityCache[key] = ts
+    return ts
+}
+
+/** Whole days since the device last reported; null = never (within the last year). */
+def deviceInactiveDays(d) {
+    def ts = deviceLastEventMs(d)
+    if (ts == null) return null
+    return ((now() - (ts as Long)) / 86400000L) as int
+}
+
+def activityLabel(d) {
+    def days = deviceInactiveDays(d)
+    if (days == null) return "(never)"
+    if (days == 0) return "(today)"
+    if (days == 1) return "(yesterday)"
+    return "(${days}d)"
+}
+
+// --- exposure picker ----------------------------------------------------------
+
+def exposureCapOptions() {
+    def caps = [] as Set
+    exposureUniverse().each { d ->
+        try { d.capabilities?.each { caps << it.name } } catch (e) { /* ignore */ }
+    }
+    return caps.sort().collectEntries { [(it): it] }
+}
+
+def exposureCandidates() {
+    def q = settings.expSearch?.toString()?.trim()?.toLowerCase()
+    def cap = settings.expCap?.toString()
+    def days = (settings.expActiveDays != null ? settings.expActiveDays as int : 30)
+    return exposureUniverse().findAll { d ->
+        if (q && !(d.displayName?.toLowerCase()?.contains(q))) return false
+        if (cap) {
+            def has = false
+            try { has = d.capabilities?.any { it.name == cap } } catch (e) { /* ignore */ }
+            if (!has) return false
+        }
+        if (days > 0) {
+            def inactive = deviceInactiveDays(d)
+            if (inactive == null || inactive > days) return false
+        }
+        return true
+    }.sort { it.displayName?.toLowerCase() }
+}
+
+def exposureOptions() {
+    def opts = [:]
+    // Currently-exposed devices always appear (checked), so they can be unchecked
+    // even when the filters hide them.
+    exposedDeviceIds().each { id ->
+        def d = allVisibleDevices().find { it.id.toString() == id }
+        if (d) opts[id] = "✓ ${d.displayName} ${activityLabel(d)}"
+    }
+    exposureCandidates().each { d ->
+        def id = d.id.toString()
+        if (!opts.containsKey(id)) opts[id] = "${d.displayName} ${activityLabel(d)}"
+    }
+    return opts
 }
 
 def allExposedDevices() {
-    def all = []
-    deviceSettingNames().each { n ->
-        def v = settings[n]
-        if (v) all.addAll(v instanceof List ? v : [v])
-    }
-    return all.unique { it.id }
+    def ids = exposedDeviceIds()
+    return exposureUniverse().findAll { ids.contains(it.id.toString()) }
 }
 
 def getDeviceById(id) {
     if (!id) return null
     def s = id.toString()
-    return allExposedDevices().find { it.id.toString() == s }
+    return allVisibleDevices().find { it.id.toString() == s }
 }
 
 def speechDevices() {
@@ -1571,8 +1824,9 @@ def modeOptions() {
 }
 
 def thermostatOptions() {
-    def t = settings.clThermostats
-    def list = t ? (t instanceof List ? t : [t]) : []
+    def list = allExposedDevices().findAll {
+        try { it.capabilities?.any { c -> c.name == "Thermostat" } } catch (e) { false }
+    }
     return list.sort { it.displayName }.collectEntries { [(it.id.toString()): it.displayName] }
 }
 

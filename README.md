@@ -25,12 +25,21 @@ usable by anything that speaks HTTP.
 2. Still in Apps Code, open **Muse Bridge**, click **OAuth**, and enable it.
    (The API needs an access token; without this step the token page stays empty.)
 3. Go to **Apps → Add User App → Muse Bridge**.
-4. **Devices to expose** — select every device the API and rules may use.
-5. Set a **command passcode** on the main page. Until you do, the API refuses
+4. **Devices to expose** — open the master list and Select All (this
+   authorizes the app to see your devices), then use **Choose exposed
+   devices** to pick which ones the API and rules actually use. The picker
+   has text search, a device-type filter, and an "active within the last N
+   days" filter to hide dead devices (N is configurable, 0 shows all).
+   Upgrading from an older version keeps your previous selections.
+5. **Device health** (optional) — daily text-push alerts for low batteries
+   (threshold configurable) and devices that have gone quiet (days
+   configurable), each with a per-device ignore list. Health alerts are
+   push-only; they never play on speakers.
+6. Set a **command passcode** on the main page. Until you do, the API refuses
    security-sensitive actions (unlock, garage open, valve control, siren
    control, mode changes, HSM arm/disarm).
-6. **Alert rules** — create rules (optional; they can also be added later via API).
-6. **API Access** — copy the cloud/local URLs. They already include
+7. **Alert rules** — create rules (optional; they can also be added later via API).
+8. **API Access** — copy the cloud/local URLs. They already include
    `?access_token=…`. Keep the token secret.
 
 To rotate the token, disable/re-enable OAuth in Apps Code or reinstall the app.
@@ -188,6 +197,20 @@ e.g. *contact `open` while HSM is armed* — for intrusion-style alerts.
 
 `POST /notify` sends an ad-hoc push without a rule:
 `{"text":"…","devices":["43"]}`.
+
+## Device health
+
+A daily, push-only health digest — never spoken on speakers:
+
+- **Low batteries** — warns at or below your threshold (default 20%).
+- **Quiet devices** — warns when a device has no events for your N days
+  (default 7), including devices that never reported.
+- Each check has its own **per-device ignore list**.
+- Runs daily at your chosen time (default 9:00 AM); one summary listing
+  everything needing attention.
+
+The page also shows a live "right now" preview so you can tune thresholds
+and ignore lists before the first scheduled run.
 
 ### curl examples
 
