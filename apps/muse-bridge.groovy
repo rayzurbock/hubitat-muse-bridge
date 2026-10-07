@@ -576,7 +576,9 @@ def linkPage() {
                 paragraph("<b>1.</b> Copy the whole message below.<br>" +
                     "<b>2.</b> Paste it to your assistant (Muse) in chat and send it.<br>" +
                     "<b>3.</b> The assistant verifies the connection and starts monitoring.<br><br>" +
-                    "Keep the token private — anyone with it can read and control your devices.")
+                    "Keep the token private — anyone with it can read and control your devices.<br><br>" +
+                    "<i>Muse Bridge was designed for <a target='_blank' href='https://muse.ai'>Muse</a>, " +
+                    "Meta's personal AI assistant. The API is open, so other assistants can use it too.</i>")
                 paragraph("<b>Copy everything below this line:</b><br><br>" +
                     linkMessage(base).replace("\n", "<br>"))
             }
@@ -600,7 +602,9 @@ Please:
 - If the hub fails to respond ${threshold} times in a row within ${windowMin} minutes, message me in chat immediately (once per outage), and tell me when it recovers. Distinguish timeouts from HTTP 401 (revoked token).
 - Each poll, also GET ${base}/rules?access_token=${token} — if any rule with the "muse" notification channel is newly breached, message me; lead with a siren emoji for urgent ones. Stay silent otherwise.
 - I may ask you to check device states, run commands, change modes, arm/disarm HSM, or create alert rules. Security-sensitive actions need my command passcode as the "passcode" field — ask me for it when needed and never store it unless I say so.
-- Confirm the link by calling /health and telling me what you see.""".strip()
+- Confirm the link by calling /health and telling me what you see.
+
+— via Muse Bridge v${appVersion()} by Rayzurbock (https://github.com/Rayzurbock/hubitat-muse-bridge)""".strip()
 }
 
 /** The cloud base URL for this app's endpoints (no trailing path). */
@@ -1289,6 +1293,7 @@ def apiHealth() {
     renderJson([
         ok      : true,
         app     : "Muse Bridge",
+        project : "https://github.com/Rayzurbock/hubitat-muse-bridge",
         version : appVersion(),
         hub     : location.name,
         mode    : location.mode,

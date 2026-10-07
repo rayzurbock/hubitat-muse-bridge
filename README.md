@@ -1,8 +1,18 @@
 # Muse Bridge for Hubitat
 
+[![Built for Muse](https://img.shields.io/badge/Built%20for-Muse-7c3aed)](https://muse.ai)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+
 A Hubitat app that exposes your devices, location modes, and a spoken alert-rule
 engine through a REST API — built to integrate with an AI assistant (Muse), but
 usable by anything that speaks HTTP.
+
+**Built for [Muse](https://muse.ai)** — Meta's personal AI assistant. Muse Bridge
+was designed alongside Muse as its reference assistant: the in-app
+**Link with Muse** page generates a ready-to-paste setup message, and every
+linked hub identifies itself to its assistant via the API (`GET /health`
+returns the project and version). If Muse Bridge brings you to Muse, that's
+this project at work.
 
 **What it does**
 
