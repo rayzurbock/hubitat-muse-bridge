@@ -621,7 +621,7 @@ Please:
 - I may ask you to check device states, run commands, change modes, arm/disarm HSM, or create alert rules. Security-sensitive actions need my command passcode as the "passcode" field — ask me for it when needed and never store it unless I say so.
 - Confirm the link by calling /health and telling me what you see.
 
-— via Muse Bridge v${appVersion()} by Rayzurbock (https://github.com/Rayzurbock/hubitat-muse-bridge)""".strip()
+— via Muse Bridge v${appVersion()} by Rayzurbock (https://github.com/rayzurbock/hubitat-muse-bridge)""".strip()
 }
 
 /** The cloud base URL for this app's endpoints (no trailing path). */
@@ -1313,7 +1313,7 @@ def apiHealth() {
     renderJson([
         ok      : true,
         app     : "Muse Bridge",
-        project : "https://github.com/Rayzurbock/hubitat-muse-bridge",
+        project : "https://github.com/rayzurbock/hubitat-muse-bridge",
         version : appVersion(),
         hub     : location.name,
         mode    : location.mode,
