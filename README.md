@@ -234,8 +234,12 @@ A daily, push-only health digest — never spoken on speakers:
 - **Quiet devices** — warns when a device has no events for your N days
   (default 7), including devices that never reported.
 - Each check has its own **per-device ignore list**.
-- Runs daily at your chosen time (default 9:00 AM); one summary listing
-  everything needing attention.
+- Runs daily at your chosen time (default 9:00 AM) on the days you pick
+  (default: every day — e.g. weekends only); one summary listing the most
+  urgent devices first.
+- **Top-N limit** — the notification lists only the most urgent 5, 10, 15,
+  20, or all devices (default 10); anything beyond the limit is summarized
+  as “…and N more” instead of spamming your phone.
 
 The page also shows a live "right now" preview so you can tune thresholds
 and ignore lists before the first scheduled run.

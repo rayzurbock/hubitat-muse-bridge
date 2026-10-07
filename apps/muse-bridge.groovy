@@ -349,6 +349,13 @@ def healthPage() {
                 "They never play on speakers.")
             input "healthTime", "time", title: "Run the health check daily at",
                 required: false, description: "Leave blank for 9:00 AM"
+            input "healthDays", "enum", title: "Check on these days",
+                multiple: true, required: false,
+                options: ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"],
+                description: "Leave blank to check every day (e.g. weekends only)"
+            input "healthMaxProblems", "enum", title: "Devices listed per notification",
+                options: ["5", "10", "15", "20", "All"], defaultValue: "10", required: false,
+                description: "Most urgent first; the rest are summarized as “and N more”"
             def problems = healthProblems()
             paragraph(problems ?
                 "<b>Right now:</b><br>• " + problems.join("<br>• ") :
@@ -361,7 +368,9 @@ def healthPage() {
 
 def healthProblems() {
     ensureActivityCache()
-    def problems = []
+    // Each entry is [severityKey, text]; sorted most-urgent-first before returning.
+    def battery = []
+    def inactive = []
     if (settings.healthBattery != false) {
         def threshold = (settings.healthBatteryThreshold != null ? settings.healthBatteryThreshold as int : 20)
         def ignore = (settings.healthBatteryIgnore ?: [])*.toString()
@@ -372,7 +381,7 @@ def healthProblems() {
                 def v = d.currentValue("battery")
                 if (v == null) return
                 def n = v.toString().isNumber() ? (v as BigDecimal) : null
-                if (n != null && n <= threshold) problems << "${d.displayName}: battery ${n.intValue()}%"
+                if (n != null && n <= threshold) battery << [n, "${d.displayName}: battery ${n.intValue()}%"]
             } catch (e) {
                 logDebug("battery check failed for ${d.displayName}: ${e.message}")
             }
@@ -383,21 +392,37 @@ def healthProblems() {
         def ignore = (settings.healthInactiveIgnore ?: [])*.toString()
         allExposedDevices().each { d ->
             if (ignore.contains(d.id.toString())) return
-            def inactive = deviceInactiveDays(d)
-            if (inactive == null) problems << "${d.displayName}: never reported any activity"
-            else if (inactive >= days) problems << "${d.displayName}: no activity for ${inactive} days"
+            def inactiveDays = deviceInactiveDays(d)
+            if (inactiveDays == null) inactive << [999999, "${d.displayName}: never reported any activity"]
+            else if (inactiveDays >= days) inactive << [inactiveDays, "${d.displayName}: no activity for ${inactiveDays} days"]
         }
     }
-    return problems
+    battery.sort { a, b -> a[0] <=> b[0] }    // lowest battery first
+    inactive.sort { a, b -> b[0] <=> a[0] }   // longest quiet (never first) first
+    return (battery + inactive).collect { it[1] }
 }
 
 def deviceHealthCheck() {
+    def days = settings.healthDays
+    if (days) {
+        def today = new Date().format("EEEE")
+        if (!days.contains(today)) {
+            logDebug("device health check: skipping, ${today} not selected")
+            return
+        }
+    }
     def problems = healthProblems()
     if (!problems) {
         logDebug("device health check: all clear")
         return
     }
-    log.info "Muse Bridge device health: ${problems.size()} issue(s): ${problems.join('; ')}"
+    // Notify about the most urgent only; summarize the rest.
+    def maxN = settings.healthMaxProblems ?: "10"
+    def shown = problems
+    if (maxN != "All" && problems.size() > (maxN as int)) {
+        shown = problems.take(maxN as int) + ["...and ${problems.size() - (maxN as int)} more"]
+    }
+    log.info "Muse Bridge device health: ${problems.size()} issue(s), notifying top ${shown.size()}"
     def phones = settingDeviceList("ntPhones")
     if (!phones) {
         log.warn "Muse Bridge: health check found problems but no notification devices are configured"
@@ -406,7 +431,7 @@ def deviceHealthCheck() {
     // Split into ~200-char chunks so long lists survive push limits.
     def chunks = []
     def current = ""
-    problems.each { p ->
+    shown.each { p ->
         def add = (current ? "; " : "") + p
         if ((current + add).length() > 200 && current) {
             chunks << current
@@ -1665,7 +1690,7 @@ def ruleSummary(rule) {
 // Device helpers
 // ============================================================================
 
-def appVersion() { return "1.0.0" }
+def appVersion() { return "1.1.0" }
 
 def logDebug(String msg) {
     if (settings.logDebug) log.debug "Muse Bridge: ${msg}"
