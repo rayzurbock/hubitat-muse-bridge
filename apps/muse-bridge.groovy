@@ -143,58 +143,58 @@ def devicesPage() {
             paragraph("Hubitat's per-capability pickers don't always offer Select All. " +
                 "Use this master list instead: open it, Select All, Done. " +
                 "The capability sections below are optional fine-tuning.")
-            input "devMaster", "capability.*", title: "All devices (master list)", multiple: true, required: false
+            input "devMaster", "capability.*", title: "All devices (master list)", multiple: true, required: false, showFilter: true
         }
         section("Switches, dimmers & lights") {
-            input "swSwitches", "capability.switch", title: "Switches", multiple: true, required: false
-            input "swLevels", "capability.switchLevel", title: "Dimmers / level controls", multiple: true, required: false
-            input "swColors", "capability.colorControl", title: "Color lights", multiple: true, required: false
+            input "swSwitches", "capability.switch", title: "Switches", multiple: true, required: false, showFilter: true
+            input "swLevels", "capability.switchLevel", title: "Dimmers / level controls", multiple: true, required: false, showFilter: true
+            input "swColors", "capability.colorControl", title: "Color lights", multiple: true, required: false, showFilter: true
         }
         section("Locks, doors, valves, shades & buttons") {
-            input "swLocks", "capability.lock", title: "Locks", multiple: true, required: false
-            input "swGarage", "capability.garageDoorControl", title: "Garage doors", multiple: true, required: false
-            input "swValves", "capability.valve", title: "Valves", multiple: true, required: false
-            input "swShades", "capability.windowShade", title: "Shades / blinds", multiple: true, required: false
-            input "swButtons", "capability.button", title: "Buttons", multiple: true, required: false
+            input "swLocks", "capability.lock", title: "Locks", multiple: true, required: false, showFilter: true
+            input "swGarage", "capability.garageDoorControl", title: "Garage doors", multiple: true, required: false, showFilter: true
+            input "swValves", "capability.valve", title: "Valves", multiple: true, required: false, showFilter: true
+            input "swShades", "capability.windowShade", title: "Shades / blinds", multiple: true, required: false, showFilter: true
+            input "swButtons", "capability.button", title: "Buttons", multiple: true, required: false, showFilter: true
         }
         section("Contact, motion & presence") {
-            input "seContact", "capability.contactSensor", title: "Contact sensors", multiple: true, required: false
-            input "seMotion", "capability.motionSensor", title: "Motion sensors", multiple: true, required: false
-            input "sePresence", "capability.presenceSensor", title: "Presence sensors", multiple: true, required: false
-            input "seAccel", "capability.accelerationSensor", title: "Acceleration sensors", multiple: true, required: false
-            input "seTamper", "capability.tamperAlert", title: "Tamper sensors", multiple: true, required: false
+            input "seContact", "capability.contactSensor", title: "Contact sensors", multiple: true, required: false, showFilter: true
+            input "seMotion", "capability.motionSensor", title: "Motion sensors", multiple: true, required: false, showFilter: true
+            input "sePresence", "capability.presenceSensor", title: "Presence sensors", multiple: true, required: false, showFilter: true
+            input "seAccel", "capability.accelerationSensor", title: "Acceleration sensors", multiple: true, required: false, showFilter: true
+            input "seTamper", "capability.tamperAlert", title: "Tamper sensors", multiple: true, required: false, showFilter: true
         }
         section("Environmental") {
-            input "enTemp", "capability.temperatureMeasurement", title: "Temperature sensors", multiple: true, required: false
-            input "enHumidity", "capability.relativeHumidityMeasurement", title: "Humidity sensors", multiple: true, required: false
-            input "enIllum", "capability.illuminanceMeasurement", title: "Illuminance sensors", multiple: true, required: false
-            input "enPower", "capability.powerMeter", title: "Power meters", multiple: true, required: false
-            input "enEnergy", "capability.energyMeter", title: "Energy meters", multiple: true, required: false
-            input "enBattery", "capability.battery", title: "Battery devices", multiple: true, required: false
+            input "enTemp", "capability.temperatureMeasurement", title: "Temperature sensors", multiple: true, required: false, showFilter: true
+            input "enHumidity", "capability.relativeHumidityMeasurement", title: "Humidity sensors", multiple: true, required: false, showFilter: true
+            input "enIllum", "capability.illuminanceMeasurement", title: "Illuminance sensors", multiple: true, required: false, showFilter: true
+            input "enPower", "capability.powerMeter", title: "Power meters", multiple: true, required: false, showFilter: true
+            input "enEnergy", "capability.energyMeter", title: "Energy meters", multiple: true, required: false, showFilter: true
+            input "enBattery", "capability.battery", title: "Battery devices", multiple: true, required: false, showFilter: true
         }
         section("Safety") {
-            input "saWater", "capability.waterSensor", title: "Water sensors", multiple: true, required: false
-            input "saSmoke", "capability.smokeDetector", title: "Smoke detectors", multiple: true, required: false
-            input "saCO", "capability.carbonMonoxideDetector", title: "Carbon monoxide detectors", multiple: true, required: false
+            input "saWater", "capability.waterSensor", title: "Water sensors", multiple: true, required: false, showFilter: true
+            input "saSmoke", "capability.smokeDetector", title: "Smoke detectors", multiple: true, required: false, showFilter: true
+            input "saCO", "capability.carbonMonoxideDetector", title: "Carbon monoxide detectors", multiple: true, required: false, showFilter: true
         }
         section("Climate") {
-            input "clThermostats", "capability.thermostat", title: "Thermostats", multiple: true, required: false
+            input "clThermostats", "capability.thermostat", title: "Thermostats", multiple: true, required: false, showFilter: true
         }
         section("Speech & announcements") {
             paragraph("Alert rules speak through these devices, using the <b>speak</b> command " +
                 "when available and <b>playText</b> otherwise.")
-            input "spSpeech", "capability.speechSynthesis", title: "Speech synthesis devices", multiple: true, required: false
-            input "spAudio", "capability.audioNotification", title: "Audio notification devices", multiple: true, required: false
-            input "spMusic", "capability.musicPlayer", title: "Music players", multiple: true, required: false
+            input "spSpeech", "capability.speechSynthesis", title: "Speech synthesis devices", multiple: true, required: false, showFilter: true
+            input "spAudio", "capability.audioNotification", title: "Audio notification devices", multiple: true, required: false, showFilter: true
+            input "spMusic", "capability.musicPlayer", title: "Music players", multiple: true, required: false, showFilter: true
         }
         section("Sirens") {
-            input "alSirens", "capability.alarm", title: "Sirens / alarms", multiple: true, required: false
+            input "alSirens", "capability.alarm", title: "Sirens / alarms", multiple: true, required: false, showFilter: true
         }
         section("Phone / push notifications") {
             paragraph("Each Hubitat mobile-app device is one phone or tablet. " +
                 "Rules can push text alerts to specific phones, so a text alert " +
                 "can go to one person instead of everyone.")
-            input "ntPhones", "capability.notification", title: "Notification devices", multiple: true, required: false
+            input "ntPhones", "capability.notification", title: "Notification devices", multiple: true, required: false, showFilter: true
         }
     }
 }
