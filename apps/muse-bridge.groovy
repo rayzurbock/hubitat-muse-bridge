@@ -62,6 +62,9 @@ mappings {
     path("/mode") {
         action: [GET: "apiGetMode", POST: "apiSetMode"]
     }
+    path("/hsm") {
+        action: [GET: "apiGetHsm", POST: "apiSetHsm"]
+    }
     path("/speak") {
         action: [POST: "apiSpeak"]
     }
@@ -107,6 +110,15 @@ def mainPage() {
             href(name: "apiHref", page: "apiPage",
                 title: "API Access",
                 description: state.accessToken ? "Endpoints and token ready" : "OAuth token missing — see page")
+        }
+        section("Security") {
+            paragraph("A command passcode is required by the API before security-sensitive " +
+                "actions: unlocking locks, opening garage doors, opening/closing valves, " +
+                "siren control, location mode changes, and HSM arm/disarm.")
+            input "securityPasscode", "text", title: "Command passcode",
+                description: "Anyone with hub admin access can see this — that is expected"
+            input "requirePasscode", "bool", title: "Require the passcode for security-sensitive actions",
+                defaultValue: true
         }
         section("Options") {
             input "logDebug", "bool", title: "Enable debug logging", defaultValue: false
@@ -289,6 +301,10 @@ def apiPage() {
                 paragraph("<b>Cloud devices:</b><br>${fullApiServerUrl('devices')}?access_token=${state.accessToken}")
                 paragraph("<b>Local health check:</b><br>${fullLocalApiServerUrl('health')}?access_token=${state.accessToken}")
                 paragraph("<b>Local devices:</b><br>${fullLocalApiServerUrl('devices')}?access_token=${state.accessToken}")
+                paragraph("Security-sensitive actions (unlock, garage open, valve open/close, " +
+                    "siren control, mode changes, HSM arm/disarm) additionally require your " +
+                    "command passcode as <b>passcode</b> in the JSON body or query string. " +
+                    "Set it on the app's main page.")
                 paragraph("Full endpoint reference is in the README. To revoke access, disable OAuth " +
                     "in Apps Code or reinstall the app to rotate the token.")
             }
@@ -763,6 +779,43 @@ def renderJson(obj, int status = 200) {
     render status: status, contentType: "application/json", data: JsonOutput.toJson(obj)
 }
 
+// --- command passcode --------------------------------------------------------
+// Security-sensitive actions (anything that grants access or changes the
+// security posture) require the command passcode configured in the app,
+// in addition to the API access token. Fail closed: with no passcode set,
+// sensitive actions are refused.
+
+def sensitiveCommandMap() {
+    return ["lock"             : ["unlock"],
+            "garageDoorControl": ["open"],
+            "valve"            : ["open", "close"],
+            "alarm"            : ["off", "siren", "strobe", "both"]]
+}
+
+def isSensitiveCommand(d, String cmd) {
+    def caps = d.capabilities*.name
+    return sensitiveCommandMap().any { cap, cmds -> cap in caps && cmd in cmds }
+}
+
+def passcodeRequired() {
+    return settings.requirePasscode != false
+}
+
+/** Returns [ok: true] or [ok: false, error: "..."]. Never logs the passcode. */
+def checkPasscode() {
+    if (!passcodeRequired()) return [ok: true]
+    def configured = settings.securityPasscode?.toString()?.trim()
+    if (!configured) {
+        return [ok: false,
+                error: "refused: set a command passcode in the Muse Bridge app before security-sensitive actions are allowed"]
+    }
+    def body = request.JSON ?: [:]
+    def supplied = (body.passcode ?: params.passcode)?.toString()
+    if (supplied == configured) return [ok: true]
+    log.warn "Muse Bridge: rejected a security-sensitive action (missing or wrong passcode)"
+    return [ok: false, error: "invalid or missing passcode"]
+}
+
 def apiHealth() {
     if (!requireAuth()) return
     def rules = getRules()
@@ -802,6 +855,10 @@ def apiDeviceCommand() {
         renderJson([error: "device '${d.displayName}' has no command '${cmd}'",
                     supported: d.supportedCommands*.name], 400)
         return
+    }
+    if (isSensitiveCommand(d, cmd)) {
+        def pc = checkPasscode()
+        if (!pc.ok) { renderJson([error: pc.error], 403); return }
     }
     def args = (body.args instanceof List) ? body.args : []
     try {
@@ -849,6 +906,8 @@ def apiGetMode() {
 
 def apiSetMode() {
     if (!requireAuth()) return
+    def pc = checkPasscode()
+    if (!pc.ok) { renderJson([error: pc.error], 403); return }
     def body = request.JSON ?: [:]
     def mode = (body.mode ?: params.mode)?.toString()
     if (!mode) { renderJson([error: "missing 'mode'"], 400); return }
@@ -859,6 +918,34 @@ def apiSetMode() {
     log.info "Muse Bridge API: setting mode to ${mode}"
     setLocationMode(mode)
     renderJson([ok: true, mode: mode])
+}
+
+def apiGetHsm() {
+    if (!requireAuth()) return
+    renderJson([hsm: hsmStatus()])
+}
+
+def apiSetHsm() {
+    if (!requireAuth()) return
+    def pc = checkPasscode()
+    if (!pc.ok) { renderJson([error: pc.error], 403); return }
+    def body = request.JSON ?: [:]
+    def arm = (body.arm ?: params.arm)?.toString()
+    if (!(arm in ["armAway", "armHome", "armNight", "disarm"])) {
+        renderJson([error: "arm must be one of: armAway, armHome, armNight, disarm"], 400)
+        return
+    }
+    log.info "Muse Bridge API: setting HSM to ${arm}"
+    sendLocationEvent(name: "hsmSetArm", value: arm)
+    renderJson([ok: true, hsm: arm])
+}
+
+def hsmStatus() {
+    try {
+        return location.hsmStatus
+    } catch (e) {
+        return null
+    }
 }
 
 def apiSpeak() {
@@ -1038,7 +1125,7 @@ def ruleSummary(rule) {
 // Device helpers
 // ============================================================================
 
-def appVersion() { return "1.0.0" }
+def appVersion() { return "1.1.0" }
 
 def logDebug(String msg) {
     if (settings.logDebug) log.debug "Muse Bridge: ${msg}"

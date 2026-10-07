@@ -26,7 +26,10 @@ usable by anything that speaks HTTP.
    (The API needs an access token; without this step the token page stays empty.)
 3. Go to **Apps → Add User App → Muse Bridge**.
 4. **Devices to expose** — select every device the API and rules may use.
-5. **Alert rules** — create rules (optional; they can also be added later via API).
+5. Set a **command passcode** on the main page. Until you do, the API refuses
+   security-sensitive actions (unlock, garage open, valve control, siren
+   control, mode changes, HSM arm/disarm).
+6. **Alert rules** — create rules (optional; they can also be added later via API).
 6. **API Access** — copy the cloud/local URLs. They already include
    `?access_token=…`. Keep the token secret.
 
@@ -66,7 +69,9 @@ Base URLs are shown on the app's **API Access** page (cloud and local).
 | GET | `/devices/:id/events?max=20` | Recent device events |
 | GET | `/modes` | Location modes + current mode |
 | GET | `/mode` | Current mode |
-| POST | `/mode` | Set mode: `{"mode":"Away"}` |
+| POST | `/mode` | Set mode: `{"mode":"Away"}` — **passcode required** |
+| GET | `/hsm` | Hubitat Safety Monitor status (`armedAway`, `armedHome`, `armedNight`, `disarmed`, …; null if HSM not installed) |
+| POST | `/hsm` | Arm/disarm HSM: `{"arm":"armAway"}` (`armAway`, `armHome`, `armNight`, `disarm`) — **passcode required** |
 | POST | `/speak` | Announce: `{"text":"Hello house","devices":["42"]}` (devices optional) |
 | GET | `/rules` | Rules with live state (pending / breached / last alert) |
 | POST | `/rules` | Create a rule (see schema below) |
@@ -146,11 +151,24 @@ assistant is unreachable.
 
 - The access token is a bearer credential: anyone with the URL can read device
   state and run commands. Treat it like a password.
+- **Command passcode:** security-sensitive actions need a second credential —
+  the passcode you set on the app's main page — passed as `passcode` in the JSON
+  body or query string. This covers:
+  - `unlock` on locks, `open` on garage doors, `open`/`close` on valves,
+    `off`/`siren`/`strobe`/`both` on sirens,
+  - `POST /mode` (location mode changes),
+  - `POST /hsm` (HSM arm/disarm).
+  
+  With no passcode configured, sensitive actions are refused outright (fail
+  closed). Everything else — lights, polling, speech, rules — needs only the
+  access token.
 - Prefer the cloud endpoint only if you need remote access; use the local
   endpoint on your LAN otherwise.
-- The app performs no allow-listing on commands — `POST /devices/:id/command`
-  can run anything the device supports, exactly like the Hubitat UI can.
-- Tokens are validated on every request (401 otherwise).
+- The app performs no allow-listing on non-sensitive commands —
+  `POST /devices/:id/command` can run anything the device supports, exactly
+  like the Hubitat UI can.
+- Tokens are validated on every request (401 otherwise); a bad passcode gets
+  a 403 and is logged without revealing the value.
 
 ## Development
 
