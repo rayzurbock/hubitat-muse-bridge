@@ -167,8 +167,9 @@ Base URLs are shown on the app's **API Access** page (cloud and local).
 Each rule picks its announcement channels:
 
 - **🔊 Speech** — spoken on the house speakers via `speechSynthesis`,
-  `audioNotification`, or `musicPlayer` devices (uses `speak`, falls back to
-  `playText`). Pick specific speakers or leave blank for all.
+  `audioNotification`, or `musicPlayer` devices. Uses `speak` when available,
+  otherwise `playTextAndResume` (music resumes afterwards) or `playText`.
+  Pick specific speakers or leave blank for all.
 - **📱 Push** — text push via the Hubitat mobile app. Each phone/tablet with
   the app is a separate *notification device*, so picking individual devices
   targets individual people instead of the whole household.
@@ -249,3 +250,12 @@ assistant is unreachable.
 ## License
 
 MIT — see [LICENSE](LICENSE).
+
+## Support
+
+Muse Bridge is free. If you'd like to support its development (including the
+costs of the AI services it integrates with):
+
+- [Cash.me/$Lowrance](https://cash.me/$Lowrance) — use a debit card, it's free for both of us
+- [Venmo @BrianLowrance](https://venmo.com/code?user_id=2603208862072832399)
+- [PayPal.me/brianlowrance](https://paypal.me/brianlowrance)

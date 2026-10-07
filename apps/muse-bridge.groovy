@@ -130,6 +130,18 @@ def mainPage() {
         section("Options") {
             input "logDebug", "bool", title: "Enable debug logging", defaultValue: false
         }
+        section("Donations") {
+            paragraph("Muse Bridge is provided to the community for free. " +
+                "It takes a lot of time to build and support any complex app. " +
+                "If you wish to support the time and effort put into development " +
+                "(including the costs of the AI services it integrates with), " +
+                "you may submit a donation with one of the following:<br>" +
+                "<ul>" +
+                "<li><b>Cash.me</b> = <a target='_blank' href='https://cash.me/\$Lowrance'>https://cash.me/\$Lowrance</a> (use a debit card, it's free for both of us)</li>" +
+                "<li><b>Venmo</b> = <a target='_blank' href='https://venmo.com/code?user_id=2603208862072832399'>@BrianLowrance</a></li>" +
+                "<li><b>Paypal.me</b> = <a target='_blank' href='https://paypal.me/brianlowrance'>https://paypal.me/brianlowrance</a> (they take a little since the account is set up as a business account)</li>" +
+                "</ul>")
+        }
     }
 }
 
@@ -706,6 +718,8 @@ def speakOnDevices(List ids, String text) {
         try {
             if (d.hasCommand("speak")) {
                 d.speak(text)
+            } else if (d.hasCommand("playTextAndResume")) {
+                d.playTextAndResume(text) // music keeps playing after the announcement
             } else if (d.hasCommand("playText")) {
                 d.playText(text)
             } else {
@@ -1306,7 +1320,7 @@ def ruleSummary(rule) {
 // Device helpers
 // ============================================================================
 
-def appVersion() { return "1.3.0" }
+def appVersion() { return "1.3.1" }
 
 def logDebug(String msg) {
     if (settings.logDebug) log.debug "Muse Bridge: ${msg}"
