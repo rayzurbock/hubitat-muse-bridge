@@ -147,7 +147,8 @@ Base URLs are shown on the app's **API Access** page (cloud and local).
   "channels": ["speech", "push", "muse"],
   "pushDeviceIds": ["43"],
   "notifyClear": true,
-  "urgent": true
+  "urgent": true,
+  "volume": 85
 }
 ```
 
@@ -160,6 +161,7 @@ Base URLs are shown on the app's **API Access** page (cloud and local).
 - `channels`: any of `speech`, `push`, `muse` (default `["speech"]`).
 - `pushDeviceIds`: notification-device ids for push; blank = all phones.
 - `urgent`: prefix alerts so they stand out (`Urgent.` spoken, `🚨 URGENT:` on push).
+- `volume`: announcement volume for this rule (0-100); blank = app default.
 - All condition fields are optional; omitted = no restriction.
 
 ## Notifications
@@ -169,7 +171,9 @@ Each rule picks its announcement channels:
 - **🔊 Speech** — spoken on the house speakers via `speechSynthesis`,
   `audioNotification`, or `musicPlayer` devices. Uses `speak` when available,
   otherwise `playTextAndResume` (music resumes afterwards) or `playText`.
-  Pick specific speakers or leave blank for all.
+  Pick specific speakers or leave blank for all. Announcements can play at a
+  configured volume (app default, per-rule override, or per `POST /speak`
+  call), with a minimum-volume floor and optional restore afterwards.
 - **📱 Push** — text push via the Hubitat mobile app. Each phone/tablet with
   the app is a separate *notification device*, so picking individual devices
   targets individual people instead of the whole household.

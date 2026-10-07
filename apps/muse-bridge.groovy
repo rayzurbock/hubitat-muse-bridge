@@ -194,10 +194,21 @@ def devicesPage() {
         }
         section("Speech & announcements") {
             paragraph("Alert rules speak through these devices, using the <b>speak</b> command " +
-                "when available and <b>playText</b> otherwise.")
+                "when available and <b>playTextAndResume</b>/<b>playText</b> otherwise.")
             input "spSpeech", "capability.speechSynthesis", title: "Speech synthesis devices", multiple: true, required: false, showFilter: true
             input "spAudio", "capability.audioNotification", title: "Audio notification devices", multiple: true, required: false, showFilter: true
             input "spMusic", "capability.musicPlayer", title: "Music players", multiple: true, required: false, showFilter: true
+        }
+        section("Announcement volume") {
+            paragraph("Control how loud announcements play, regardless of what the " +
+                "speaker is currently set to.")
+            input "speechVolume", "number", title: "Announcement volume (0-100, blank = leave volume alone)",
+                required: false, range: "0..100"
+            input "speechMinVolume", "number", title: "Minimum announcement volume (0-100, blank = none)",
+                required: false, range: "0..100",
+                description: "If a speaker is set lower than this, announcements play at least this loud"
+            input "restoreVolume", "bool", title: "Restore speaker volume after announcements",
+                defaultValue: true
         }
         section("Sirens") {
             input "alSirens", "capability.alarm", title: "Sirens / alarms", multiple: true, required: false, showFilter: true
@@ -320,6 +331,9 @@ def rulePage(params) {
             input "${p}pushDevs", "enum", title: "Push to (blank = all phones)",
                 multiple: true, required: false, options: pushOptions(),
                 description: "Each phone is a separate device — pick who gets the text"
+            input "${p}volume", "number", title: "Volume for this rule's announcements (0-100, blank = app default)",
+                required: false, range: "0..100",
+                description: "Handy for making urgent rules louder than the rest"
             input "${p}notifyClear", "bool", title: "Also notify when the condition clears", defaultValue: false
             input "${p}urgent", "bool", title: "URGENT priority", defaultValue: false,
                 description: "Alerts are prefixed so they stand out on every channel"
@@ -705,10 +719,10 @@ def speakForRule(rule, String text) {
         log.warn "Muse Bridge: no speech devices configured, cannot announce: ${text}"
         return
     }
-    speakOnDevices(ids, text)
+    speakOnDevices(ids, text, rule.volume != null ? rule.volume as BigDecimal : null)
 }
 
-def speakOnDevices(List ids, String text) {
+def speakOnDevices(List ids, String text, BigDecimal volume = null) {
     ids.each { id ->
         def d = getDeviceById(id)
         if (!d) {
@@ -716,6 +730,20 @@ def speakOnDevices(List ids, String text) {
             return
         }
         try {
+            def vol = effectiveVolume(d, volume)
+            def prevVol = null
+            def restoreToken = null
+            if (vol != null) {
+                prevVol = currentVolumeOf(d)
+                setDeviceVolume(d, vol)
+                if (settings.restoreVolume != false && prevVol != null && prevVol != vol) {
+                    // Remember the pre-announcement volume; a later announcement
+                    // supersedes this restore via its own token.
+                    restoreToken = now()
+                    if (!state.volRestore) state.volRestore = [:]
+                    state.volRestore[id.toString()] = [level: prevVol, at: restoreToken]
+                }
+            }
             if (d.hasCommand("speak")) {
                 d.speak(text)
             } else if (d.hasCommand("playTextAndResume")) {
@@ -725,10 +753,71 @@ def speakOnDevices(List ids, String text) {
             } else {
                 log.warn "Muse Bridge: ${d.displayName} has no speak/playText command"
             }
-            logDebug("announced on ${d.displayName}: ${text}")
+            if (restoreToken) {
+                // Rough TTS estimate (~12 chars/sec) plus a buffer, minimum 15s.
+                def delay = Math.max(15, ((text.length() / 12) as int) + 5)
+                runIn(delay, "restoreDeviceVolume",
+                    [data: [deviceId: id.toString(), at: restoreToken], overwrite: false])
+            }
+            logDebug("announced on ${d.displayName}${vol != null ? " at volume ${vol}" : ""}: ${text}")
         } catch (e) {
             log.warn "Muse Bridge: failed to announce on ${d.displayName}: ${e.message}"
         }
+    }
+}
+
+/** Resolve the volume for an announcement: explicit override, app default, or minimum. Null = don't touch. */
+def effectiveVolume(d, BigDecimal override) {
+    if (override != null) return clampVolume(override)
+    def v = settings.speechVolume
+    if (v != null) return clampVolume(v as BigDecimal)
+    def minV = settings.speechMinVolume
+    if (minV != null) {
+        def cur = currentVolumeOf(d)
+        if (cur != null && cur < (minV as BigDecimal)) return clampVolume(minV as BigDecimal)
+    }
+    return null
+}
+
+def currentVolumeOf(d) {
+    try {
+        def v = d.currentValue("level")
+        return v != null ? v as BigDecimal : null
+    } catch (e) {
+        return null
+    }
+}
+
+def setDeviceVolume(d, BigDecimal vol) {
+    def v = clampVolume(vol) as int
+    if (d.hasCommand("setVolume")) {
+        d.setVolume(v)
+    } else if (d.hasCommand("setLevel")) {
+        d.setLevel(v)
+    } else {
+        logDebug("Muse Bridge: ${d.displayName} has no volume command, skipping")
+    }
+}
+
+def clampVolume(v) {
+    def n = v as BigDecimal
+    if (n < 0) return 0
+    if (n > 100) return 100
+    return n
+}
+
+def restoreDeviceVolume(data) {
+    def devId = data?.deviceId?.toString()
+    def rec = state.volRestore?.get(devId)
+    if (!rec || rec.at != data?.at) return // superseded by a newer announcement
+    state.volRestore.remove(devId)
+    def d = getDeviceById(devId)
+    if (!d) return
+    try {
+        setDeviceVolume(d, rec.level as BigDecimal)
+        logDebug("Muse Bridge: restored ${d.displayName} volume to ${rec.level}")
+    } catch (e) {
+        log.warn "Muse Bridge: volume restore failed for ${d.displayName}: ${e.message}"
     }
 }
 
@@ -886,6 +975,7 @@ def syncRuleFromSettings(String rid) {
         pushDeviceIds  : (settings["${p}pushDevs"] ?: []).collect { it.toString() },
         notifyClear    : settings["${p}notifyClear"] == true,
         urgent         : settings["${p}urgent"] == true,
+        volume         : settings["${p}volume"] == null ? null : clampVolume(settings["${p}volume"] as BigDecimal),
         updatedAt      : now()
     ]
     def rules = getRules()
@@ -1112,11 +1202,16 @@ def apiSpeak() {
     def body = request.JSON ?: [:]
     def text = (body.text ?: params.text)?.toString()?.trim()
     if (!text) { renderJson([error: "missing 'text'"], 400); return }
+    def volume = null
+    if (body.volume != null || params.volume != null) {
+        try { volume = clampVolume((body.volume ?: params.volume) as BigDecimal) }
+        catch (e) { renderJson([error: "bad 'volume' (0-100)"], 400); return }
+    }
     def ids = (body.devices instanceof List ? body.devices : [])*.toString()
     if (!ids) ids = defaultSpeechDeviceIds()
     if (!ids) { renderJson([error: "no speech devices configured"], 400); return }
-    speakOnDevices(ids, text)
-    renderJson([ok: true, devices: ids.size(), text: text])
+    speakOnDevices(ids, text, volume)
+    renderJson([ok: true, devices: ids.size(), text: text, volume: volume])
 }
 
 def apiNotify() {
@@ -1247,6 +1342,11 @@ def buildRuleFromApi(String rid, Map body) {
     def channels = (body.channels instanceof List ? body.channels : ["speech"])*.toString()
     def badChannels = channels.findAll { !(it in ["speech", "push", "muse"]) }
     if (badChannels) return [null, "bad channels: ${badChannels} (use speech, push, muse)"]
+    def volume = null
+    if (body.volume != null) {
+        try { volume = clampVolume(body.volume as BigDecimal) }
+        catch (e) { return [null, "bad 'volume': ${body.volume} (0-100)"] }
+    }
     def rule = [
         id              : rid,
         name            : name,
@@ -1271,6 +1371,7 @@ def buildRuleFromApi(String rid, Map body) {
         pushDeviceIds   : (body.pushDeviceIds instanceof List ? body.pushDeviceIds : [])*.toString(),
         notifyClear     : body.notifyClear == true,
         urgent          : body.urgent == true,
+        volume          : volume,
         createdAt       : now(),
         updatedAt       : now()
     ]
@@ -1308,6 +1409,7 @@ def ruleSummary(rule) {
         },
         notifyClear   : rule.notifyClear == true,
         urgent        : rule.urgent == true,
+        volume        : rule.volume,
         state         : [
             pending    : st.pending,
             breached   : st.breached,
@@ -1320,7 +1422,7 @@ def ruleSummary(rule) {
 // Device helpers
 // ============================================================================
 
-def appVersion() { return "1.3.1" }
+def appVersion() { return "1.4.0" }
 
 def logDebug(String msg) {
     if (settings.logDebug) log.debug "Muse Bridge: ${msg}"
