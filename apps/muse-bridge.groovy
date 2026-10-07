@@ -38,6 +38,7 @@ preferences {
     page(name: "rulesPage", title: "Alert Rules")
     page(name: "rulePage", title: "Alert Rule")
     page(name: "apiPage", title: "API Access")
+    page(name: "linkPage", title: "Link with Muse")
 }
 
 mappings {
@@ -113,6 +114,9 @@ def mainPage() {
             href(name: "apiHref", page: "apiPage",
                 title: "API Access",
                 description: state.accessToken ? "Endpoints and token ready" : "OAuth token missing — see page")
+            href(name: "linkHref", page: "linkPage",
+                title: "Link with Muse",
+                description: state.accessToken ? "Copy-paste setup message for your assistant" : "Needs OAuth first — see API Access")
         }
         section("Security") {
             paragraph("A command passcode is required by the API before security-sensitive " +
@@ -315,6 +319,67 @@ def rulePage(params) {
             href(name: "del_${rid}", page: "rulesPage", params: [deleteId: rid],
                 title: "Delete this rule", description: "Removes the rule permanently")
         }
+    }
+}
+
+def linkPage() {
+    ensureToken()
+    dynamicPage(name: "linkPage", title: "Link with Muse", nextPage: "mainPage") {
+        section("Monitoring preferences") {
+            paragraph("These tell your assistant how closely to watch the hub. " +
+                "They're baked into the setup message below, so any assistant " +
+                "can configure itself from your choices.")
+            input "linkPollMinutes", "number", title: "Poll the hub every (minutes)",
+                defaultValue: 5, required: true
+            input "linkDownThreshold", "number",
+                title: "Message me after this many consecutive failed polls",
+                defaultValue: 3, required: true
+            input "linkDownWindow", "number", title: "…within the last X minutes",
+                defaultValue: 15, required: true
+        }
+        section("Setup — copy, paste, send") {
+            def base = cloudBase()
+            if (!state.accessToken || !base) {
+                paragraph("Enable OAuth first (see the API Access page), then come back here.")
+            } else {
+                paragraph("<b>1.</b> Copy the whole message below.<br>" +
+                    "<b>2.</b> Paste it to your assistant (Muse) in chat and send it.<br>" +
+                    "<b>3.</b> The assistant verifies the connection and starts monitoring.<br><br>" +
+                    "Keep the token private — anyone with it can read and control your devices.")
+                paragraph("<b>Copy everything below this line:</b><br><br>" +
+                    linkMessage(base).replace("\n", "<br>"))
+            }
+        }
+    }
+}
+
+/** Pre-filled, copy-paste setup message for the user's assistant. */
+def linkMessage(String base) {
+    def token = state.accessToken
+    def pollMin = settings.linkPollMinutes ?: 5
+    def threshold = settings.linkDownThreshold ?: 3
+    def windowMin = settings.linkDownWindow ?: 15
+    return """Hi Muse — please link with my Hubitat hub through the Muse Bridge app:
+
+Cloud API base URL: ${base}
+Access token: ${token}
+
+Please:
+- Poll the hub every ${pollMin} minutes: GET ${base}/health?access_token=${token}
+- If the hub fails to respond ${threshold} times in a row within ${windowMin} minutes, message me in chat immediately (once per outage), and tell me when it recovers. Distinguish timeouts from HTTP 401 (revoked token).
+- Each poll, also GET ${base}/rules?access_token=${token} — if any rule with the "muse" notification channel is newly breached, message me; lead with a siren emoji for urgent ones. Stay silent otherwise.
+- I may ask you to check device states, run commands, change modes, arm/disarm HSM, or create alert rules. Security-sensitive actions need my command passcode as the "passcode" field — ask me for it when needed and never store it unless I say so.
+- Confirm the link by calling /health and telling me what you see.""".strip()
+}
+
+/** The cloud base URL for this app's endpoints (no trailing path). */
+def cloudBase() {
+    try {
+        def u = fullApiServerUrl("x").toString() // documented: base + "/" + path
+        return u.substring(0, u.length() - 2)   // strip the trailing "/x"
+    } catch (e) {
+        log.warn "Muse Bridge: could not build cloud base URL: ${e.message}"
+        return null
     }
 }
 
@@ -1241,7 +1306,7 @@ def ruleSummary(rule) {
 // Device helpers
 // ============================================================================
 
-def appVersion() { return "1.2.0" }
+def appVersion() { return "1.3.0" }
 
 def logDebug(String msg) {
     if (settings.logDebug) log.debug "Muse Bridge: ${msg}"

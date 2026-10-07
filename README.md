@@ -35,6 +35,39 @@ usable by anything that speaks HTTP.
 
 To rotate the token, disable/re-enable OAuth in Apps Code or reinstall the app.
 
+## Linking with Muse
+
+1. In the app, open **Link with Muse**.
+2. Set your monitoring preferences: how often the assistant polls the hub,
+   and after how many consecutive failed polls (within how many minutes)
+   it should message you about an outage.
+3. Copy the pre-filled setup message and paste it to Muse in chat.
+4. Muse verifies with `GET /health` and starts monitoring.
+
+The generated message looks like this (yours is pre-filled with your real
+URLs, token, and preferences in the app):
+
+```
+Hi Muse — please link with my Hubitat hub through the Muse Bridge app:
+
+Cloud API base URL: https://cloud.hubitat.com/api/<hub-id>/apps/<app-id>
+Access token: <token>
+
+Please:
+- Poll the hub every 5 minutes: GET <base>/health?access_token=<token>
+- If the hub fails to respond 3 times in a row within 15 minutes, message
+  me in chat immediately (once per outage), and tell me when it recovers.
+  Distinguish timeouts from HTTP 401 (revoked token).
+- Each poll, also GET <base>/rules?access_token=<token> — if any rule with
+  the "muse" notification channel is newly breached, message me; lead with
+  a siren emoji for urgent ones. Stay silent otherwise.
+- I may ask you to check device states, run commands, change modes,
+  arm/disarm HSM, or create alert rules. Security-sensitive actions need my
+  command passcode as the "passcode" field — ask me for it when needed and
+  never store it unless I say so.
+- Confirm the link by calling /health and telling me what you see.
+```
+
 ## Alert rule examples
 
 **Garage door left open while the A/C runs** — the canonical example:
