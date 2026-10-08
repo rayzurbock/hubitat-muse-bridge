@@ -1,0 +1,13 @@
+{
+  "author": "Rayzurbock",
+  "gitHubUrl": "https://github.com/rayzurbock",
+  "payPalUrl": "https://paypal.me/brianlowrance",
+  "packages": [
+    {
+      "name": "Muse Bridge",
+      "category": "Integrations",
+      "location": "https://raw.githubusercontent.com/rayzurbock/hubitat-muse-bridge/main/packageManifest.json",
+      "description": "REST API plus spoken alert-rule engine for Muse and other integrations."
+    }
+  ]
+}
