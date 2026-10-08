@@ -1,1 +1,0 @@
-{"_note":"Copy to config.json (or run python3 setup.py). The access token lives in .token (chmod 600) in this directory, never in this file. Poll cadence is set by your scheduler (e.g. cron every 5 minutes).","base_url":"https://cloud.hubitat.com/api/<hub-id>/apps/<app-id>","down_threshold":3,"down_window_minutes":15,"http_timeout_seconds":25}

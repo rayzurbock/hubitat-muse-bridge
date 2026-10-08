@@ -285,22 +285,11 @@ assistant is unreachable.
 
 ## Hub monitoring
 
-The `monitor/` directory holds a small Python poller for the assistant side:
-it checks `/health` on a schedule and reports outages, recoveries, and newly
-breached alert rules as JSON your assistant or scheduler can act on.
-
-```bash
-cd monitor
-python3 setup.py   # asks for everything it needs — base URL, token, thresholds
-python3 poll.py    # one check; schedule with cron (every 5 minutes works well)
-```
-
-Setup is interactive: it prompts for the cloud API base URL and access token
-(the token is typed invisibly and stored in `.token` with owner-only
-permissions), plus the outage thresholds. Nothing is hardcoded and no
-secrets are printed, logged, or committed — `config.json`, `.token`, and
-`state.json` are git-ignored. See `monitor/README.md` for the full field
-reference.
+Monitoring happens on the assistant side, not the hub: the assistant polls
+`GET /health` on a schedule and watches for outages, recoveries, and newly
+breached alert rules. The app's **Link with Muse** page lets you set the poll
+cadence and outage thresholds your assistant should use. No hub-side
+component is needed — everything the assistant needs is already in the API.
 
 ## Security notes
 

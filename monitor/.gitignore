@@ -1,5 +1,0 @@
-# Local secrets and runtime state — never commit these.
-config.json
-.token
-state.json
-*.tmp
