@@ -538,9 +538,12 @@ def rulePage(params) {
                 defaultValue: "staysLongerThan",
                 options: ["staysLongerThan": "…persists LONGER than the duration",
                           "clearsSoonerThan": "…clears SOONER than the duration"]
-            input "${p}dur", "decimal", title: "Duration (minutes)", required: true, defaultValue: 10,
-                description: "Decimals allowed, e.g. 0.5 for 30 seconds"
+            input "${p}dur", "decimal", title: "Duration (minutes, 0 = announce immediately)", required: true, defaultValue: 10,
+                description: "Decimals allowed, e.g. 0.5 for 30 seconds. 0 fires the moment the condition is seen."
             input "${p}repeat", "decimal", title: "Repeat the announcement every (minutes, 0 = once)", defaultValue: 0
+            input "${p}cooldown", "number", title: "Cooldown between announcements (seconds, 0 = none)", defaultValue: 0,
+                range: "0..3600",
+                description: "After an announcement, skip further announcements for this long. Handy for doors the kids run through."
         }
         section("Conditions — the rule only arms when ALL of these hold (blank = always)") {
             input "${p}modes", "enum", title: "Location modes", multiple: true, required: false,
@@ -846,19 +849,33 @@ def evaluateRule(rule, String reason) {
             }
         } else { // staysLongerThan
             if (!st.pending && !st.breached) {
-                st.pending = true
-                st.pendingSince = now()
-                saveRuleState(rule.id, st)
-                def secs = Math.max(5, ((rule.durationMin as BigDecimal) * 60) as long)
-                runIn(secs, "ruleCheck", [data: [ruleId: rule.id], overwrite: false])
-                logDebug("rule '${rule.name}': condition met, checking again in ${secs}s")
+                def durMin = (rule.durationMin != null ? rule.durationMin : 10) as BigDecimal
+                if (durMin <= 0) {
+                    // immediate mode: announce right away (cooldown-aware)
+                    if (announce(rule, st, "immediate")) {
+                        st.breached = true
+                        st.lastBreach = now()
+                        saveRuleState(rule.id, st)
+                        scheduleRuleRepeat(rule)
+                        logDebug("rule '${rule.name}': condition met, announced immediately")
+                    } else {
+                        logDebug("rule '${rule.name}': in cooldown, skipping immediate announcement")
+                    }
+                } else {
+                    st.pending = true
+                    st.pendingSince = now()
+                    saveRuleState(rule.id, st)
+                    def secs = Math.max(5, (durMin * 60) as long)
+                    runIn(secs, "ruleCheck", [data: [ruleId: rule.id], overwrite: false])
+                    logDebug("rule '${rule.name}': condition met, checking again in ${secs}s")
+                }
             }
         }
     } else {
         if (rule.alertWhen == "clearsSoonerThan" && st.activeSince) {
             def elapsedMin = (now() - st.activeSince) / 60000.0
             if (elapsedMin < (rule.durationMin as BigDecimal)) {
-                fireAlert(rule, "cleared after ${elapsedMin.round(1)} min (minimum ${rule.durationMin})")
+                announce(rule, st, "cleared after ${elapsedMin.round(1)} min (minimum ${rule.durationMin})")
             } else {
                 logDebug("rule '${rule.name}': active period satisfied (${elapsedMin.round(1)} min)")
             }
@@ -886,13 +903,12 @@ def ruleCheck(data) {
     if (triggerConditionTrue(rule) && conditionsTrue(rule)) {
         st.pending = false
         st.pendingSince = null
-        st.breached = true
-        st.lastBreach = now()
         saveRuleState(rule.id, st)
-        fireAlert(rule, "active for ${rule.durationMin} min")
-        if ((rule.repeatMin as BigDecimal) > 0) {
-            def secs = Math.max(30, ((rule.repeatMin as BigDecimal) * 60) as long)
-            runIn(secs, "ruleRepeat", [data: [ruleId: rule.id], overwrite: false])
+        if (announce(rule, st, "active for ${rule.durationMin} min")) {
+            st.breached = true
+            st.lastBreach = now()
+            saveRuleState(rule.id, st)
+            scheduleRuleRepeat(rule)
         }
     } else {
         st.pending = false
@@ -914,6 +930,39 @@ def ruleRepeat(data) {
     } else {
         st.breached = false
         saveRuleState(rule.id, st)
+    }
+}
+
+/** Seconds that must pass between a rule's announcements (0 = none). */
+def cooldownSecOf(rule) { return ((rule.cooldownSec != null ? rule.cooldownSec : 0) as BigDecimal) }
+
+def inCooldown(rule, Map st) {
+    def cdMs = (cooldownSecOf(rule) * 1000) as long
+    if (cdMs <= 0) return false
+    def last = st.lastAlert as Long
+    return last != null && (now() - last) < cdMs
+}
+
+/**
+ * Cooldown-aware announcement: skips (returns false) while the rule is still
+ * cooling down from its last announcement. Stamps lastAlert on success.
+ * Manual test announcements (apiTestRule) bypass this via notifyRule directly.
+ */
+def announce(rule, Map st, String reasonDetail) {
+    if (inCooldown(rule, st)) {
+        logDebug("rule '${rule.name}': in cooldown, skipping announcement")
+        return false
+    }
+    fireAlert(rule, reasonDetail)
+    st.lastAlert = now()
+    saveRuleState(rule.id, st)
+    return true
+}
+
+def scheduleRuleRepeat(rule) {
+    if ((rule.repeatMin as BigDecimal) > 0) {
+        def secs = Math.max(30, ((rule.repeatMin as BigDecimal) * 60) as long)
+        runIn(secs, "ruleRepeat", [data: [ruleId: rule.id], overwrite: false])
     }
 }
 
@@ -1226,9 +1275,10 @@ def syncRuleFromSettings(String rid) {
         attribute      : settings["${p}attr"]?.toString(),
         operator       : settings["${p}op"]?.toString() ?: "=",
         value          : settings["${p}value"]?.toString(),
-        durationMin    : (settings["${p}dur"] ?: 10) as BigDecimal,
+        durationMin    : (settings["${p}dur"] != null ? settings["${p}dur"] : 10) as BigDecimal,
         alertWhen      : settings["${p}alertWhen"]?.toString() ?: "staysLongerThan",
         repeatMin      : (settings["${p}repeat"] ?: 0) as BigDecimal,
+        cooldownSec    : (settings["${p}cooldown"] != null ? settings["${p}cooldown"] : 0) as BigDecimal,
         modes          : (settings["${p}modes"] ?: []).collect { it.toString() },
         hsmStates      : (settings["${p}hsmStates"] ?: []).collect { it.toString() },
         thermostatId   : settings["${p}tstat"]?.toString(),
@@ -1260,7 +1310,11 @@ def syncRuleFromSettings(String rid) {
 
 def ruleDescription(rule, st) {
     def when = rule.alertWhen == "clearsSoonerThan" ? "clears sooner than" : "stays longer than"
-    def s = "${rule.attribute} ${rule.operator} ${rule.value} — alerts if it ${when} ${rule.durationMin} min"
+    def durMin = (rule.durationMin != null ? rule.durationMin : 10) as BigDecimal
+    def s = "${rule.attribute} ${rule.operator} ${rule.value} — "
+    s += durMin <= 0 ? "alerts immediately" : "alerts if it ${when} ${rule.durationMin} min"
+    def cd = (rule.cooldownSec != null ? rule.cooldownSec : 0) as BigDecimal
+    if (cd > 0) s += " (cooldown ${cd} s)"
     if (st.breached) s += " — ⚠ BREACHED"
     else if (st.pending) s += " — ⏳ pending"
     return s
@@ -1615,6 +1669,12 @@ def buildRuleFromApi(String rid, Map body) {
         try { volume = clampVolume(body.volume as BigDecimal) }
         catch (e) { return [null, "bad 'volume': ${body.volume} (0-100)"] }
     }
+    def cooldownSec = 0
+    if (body.cooldownSec != null) {
+        try { cooldownSec = body.cooldownSec as BigDecimal }
+        catch (e) { return [null, "bad 'cooldownSec': ${body.cooldownSec} (seconds, >= 0)"] }
+        if (cooldownSec < 0) return [null, "bad 'cooldownSec': ${body.cooldownSec} (seconds, >= 0)"]
+    }
     def rule = [
         id              : rid,
         name            : name,
@@ -1623,9 +1683,10 @@ def buildRuleFromApi(String rid, Map body) {
         attribute       : attribute,
         operator        : operator,
         value           : body.value?.toString(),
-        durationMin     : (body.durationMin ?: 10) as BigDecimal,
+        durationMin     : (body.durationMin != null ? body.durationMin : 10) as BigDecimal,
         alertWhen       : alertWhen,
         repeatMin       : (body.repeatMin ?: 0) as BigDecimal,
+        cooldownSec     : cooldownSec,
         modes           : modes,
         hsmStates       : hsmStates,
         thermostatId    : tstatId,
@@ -1670,6 +1731,7 @@ def ruleSummary(rule) {
         days          : rule.days,
         message       : rule.message,
         repeatMin     : rule.repeatMin,
+        cooldownSec   : rule.cooldownSec != null ? rule.cooldownSec : 0,
         channels      : rule.channels ?: ["speech"],
         pushDevices   : (rule.pushDeviceIds ?: []).collect { pid ->
             def pd = getDeviceById(pid)
@@ -1690,7 +1752,7 @@ def ruleSummary(rule) {
 // Device helpers
 // ============================================================================
 
-def appVersion() { return "1.1.0" }
+def appVersion() { return "1.2.0" }
 
 def logDebug(String msg) {
     if (settings.logDebug) log.debug "Muse Bridge: ${msg}"

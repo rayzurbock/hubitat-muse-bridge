@@ -24,7 +24,8 @@ this project at work.
   it should. Rules support conditions on mode, thermostat operating state, time
   window, and days of week.
 - **Spoken alerts** through `speechSynthesis`, `audioNotification`, or
-  `musicPlayer` devices, with optional repeat and "cleared" announcements.
+  `musicPlayer` devices, with optional repeat, "cleared" announcements, immediate
+  (zero-duration) firing, and a per-rule cooldown between announcements.
 - Rules can be created in the Hubitat UI **or via the API**, so an assistant can
   set up monitoring on demand ("alert me if the garage is open 10 minutes").
 
@@ -115,7 +116,7 @@ Please:
 - Message: `The %device% has been %value% for 10 minutes and the A/C is running.`
 - Spoken on the kitchen speaker, repeated every 5 minutes until closed.
 
-**Water leak** — water sensor `water` is `wet`, duration **0.1 minutes** (≈6 s),
+**Water leak** — water sensor `water` is `wet`, duration **0** (immediate),
 no conditions. Immediate announcement.
 
 **Sump pump short-cycling** — pump switch `switch` is `on`, alert when it clears
@@ -126,7 +127,7 @@ kicks on and right back off.
 condition: mode is **Night**, time window 22:00–06:00.
 
 **Intrusion while secured** — front door `contact` is `open`, duration
-**0.1 minutes** (≈6 s), condition: HSM is **armedAway** (or mode **Away**),
+**0** (immediate), condition: HSM is **armedAway** (or mode **Away**),
 **URGENT** priority, channels: speech + push + Muse chat. Immediate,
 can't-miss announcement on every channel.
 
@@ -171,6 +172,7 @@ Base URLs are shown on the app's **API Access** page (cloud and local).
   "durationMin": 10,
   "alertWhen": "staysLongerThan",
   "repeatMin": 5,
+  "cooldownSec": 60,
   "speakOnClear": true,
   "modes": ["Home", "Night"],
   "hsmStates": ["armedAway", "armedHome", "armedNight"],
@@ -192,6 +194,11 @@ Base URLs are shown on the app's **API Access** page (cloud and local).
 - `operator`: `=`, `!=`, `>`, `<`, `>=`, `<=` (numeric when both sides are numbers,
   case-insensitive string compare otherwise).
 - `alertWhen`: `staysLongerThan` (default) or `clearsSoonerThan`.
+- `durationMin`: minutes the condition must persist; **0 = announce immediately**
+  when the condition is first seen.
+- `cooldownSec`: seconds to skip further announcements after one fires
+  (0 = none). Handy for doors the kids run through — e.g. 60 for at most one
+  announcement per minute.
 - `triggerDevices`: **device ids** (strings) — find them in `GET /devices`.
 - `timeFrom`/`timeTo`: `HH:mm` (24h); overnight windows wrap correctly.
 - Message tokens: `%device%` `%attribute%` `%value%` `%rule%`.
