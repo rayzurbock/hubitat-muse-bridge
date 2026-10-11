@@ -511,6 +511,7 @@ def rulePage(params) {
     def rid = params?.ruleId ?: state.editingRuleId
     if (!rid || rid == "new") rid = "r${now()}"
     state.editingRuleId = rid
+    hydrateRuleEditor(rid) // show real values for API-created rules
     def p = "r_${rid}_"
     def st = ruleStateFor(rid)
     dynamicPage(name: "rulePage", title: "Alert Rule", nextPage: "rulesPage") {
@@ -1261,6 +1262,51 @@ def defaultSpeechDeviceIds() {
     return speechDevices().collect { it.id.toString() }
 }
 
+/**
+ * Fill the rule editor's settings inputs from the stored rule, so rules created
+ * via the API (which never went through the editor) show their real values
+ * instead of a blank form. Runs once per rule: after the first hydration the
+ * settings keys exist, so later renders leave the user's edits — including
+ * deliberately cleared fields — alone.
+ */
+def hydrateRuleEditor(String rid) {
+    def rule = getRule(rid)
+    if (!rule) return
+    def p = "r_${rid}_"
+    if (settings["${p}name"] != null) return // already hydrated or UI-built
+    def put = { String key, String type, value ->
+        if (value == null) return
+        if (value instanceof List && value.isEmpty()) return
+        try { app.updateSetting(key, [type: type, value: value]) }
+        catch (e) { logDebug("hydrateRuleEditor: could not set ${key}: ${e.message}") }
+    }
+    put("${p}enabled", "bool", rule.enabled != false)
+    put("${p}name", "text", rule.name?.toString())
+    put("${p}trigDevs", "enum", (rule.triggerDevices ?: []).collect { it.toString() })
+    put("${p}attr", "enum", rule.attribute?.toString())
+    put("${p}op", "enum", rule.operator?.toString() ?: "=")
+    put("${p}value", "text", rule.value?.toString())
+    put("${p}alertWhen", "enum", rule.alertWhen?.toString() ?: "staysLongerThan")
+    put("${p}dur", "decimal", rule.durationMin)
+    put("${p}repeat", "decimal", rule.repeatMin)
+    put("${p}cooldown", "number", (rule.cooldownSec != null ? rule.cooldownSec : 0))
+    put("${p}modes", "enum", (rule.modes ?: []).collect { it.toString() })
+    put("${p}hsmStates", "enum", (rule.hsmStates ?: []).collect { it.toString() })
+    put("${p}tstat", "enum", rule.thermostatId?.toString())
+    put("${p}tstatStates", "enum", (rule.thermostatStates ?: []).collect { it.toString() })
+    put("${p}timeFrom", "time", rule.timeFrom?.toString())
+    put("${p}timeTo", "time", rule.timeTo?.toString())
+    put("${p}days", "enum", (rule.days ?: []).collect { it.toString() })
+    put("${p}msg", "text", rule.message?.toString())
+    put("${p}channels", "enum", (rule.channels ?: ["speech"]).collect { it.toString() })
+    put("${p}speech", "enum", (rule.speechDeviceIds ?: []).collect { it.toString() })
+    put("${p}pushDevs", "enum", (rule.pushDeviceIds ?: []).collect { it.toString() })
+    put("${p}volume", "number", rule.volume)
+    put("${p}notifyClear", "bool", rule.notifyClear == true)
+    put("${p}urgent", "bool", rule.urgent == true)
+    logDebug("hydrateRuleEditor: populated editor for rule '${rule.name}'")
+}
+
 /** Copy the rule editor's settings into state.rules (single source of truth). */
 def syncRuleFromSettings(String rid) {
     if (!rid) return
@@ -1752,7 +1798,7 @@ def ruleSummary(rule) {
 // Device helpers
 // ============================================================================
 
-def appVersion() { return "1.2.0" }
+def appVersion() { return "1.2.1" }
 
 def logDebug(String msg) {
     if (settings.logDebug) log.debug "Muse Bridge: ${msg}"
