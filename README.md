@@ -375,6 +375,6 @@ MIT — see [LICENSE](LICENSE).
 Muse Bridge is free. If you'd like to support its development (including the
 costs of the AI services it integrates with):
 
-- [Cash.me/$Lowrance](https://cash.me/$Lowrance) — use a debit card, it's free for both of us
+- [Cash.me/$Lowrance](https://cash.me/$Lowrance) — use a debit card, there's no transaction fees for either of us
 - [Venmo @BrianLowrance](https://venmo.com/code?user_id=2603208862072832399)
 - [PayPal.me/brianlowrance](https://paypal.me/brianlowrance)
