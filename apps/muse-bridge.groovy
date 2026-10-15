@@ -42,6 +42,7 @@ preferences {
     page(name: "exposePage", title: "Choose Exposed Devices")
     page(name: "healthPage", title: "Device Health")
     page(name: "speakerPage", title: "Choose Speakers")
+    page(name: "museActionsPage", title: "Muse Automations")
 }
 
 mappings {
@@ -90,6 +91,9 @@ mappings {
     path("/rules/:id/test") {
         action: [POST: "apiTestRule"]
     }
+    path("/muse-side-actions") {
+        action: [GET: "apiListSideActions", POST: "apiSetSideActions"]
+    }
 }
 
 // ============================================================================
@@ -114,6 +118,9 @@ def mainPage() {
             href(name: "rulesHref", page: "rulesPage",
                 title: "Alert rules",
                 description: rules ? "${rules.size()} rule${rules.size() == 1 ? '' : 's'} (${breached} breached)" : "Tap to create alert rules")
+            href(name: "museActionsHref", page: "museActionsPage",
+                title: "Muse automations",
+                description: museSideActions() ? "${museSideActions().size()} assistant-side automation${museSideActions().size() == 1 ? '' : 's'} listed" : "Assistant-side schedules (if any)")
             href(name: "healthHref", page: "healthPage",
                 title: "Device health",
                 description: "Low-battery and inactive-device push alerts")
@@ -151,7 +158,7 @@ def mainPage() {
     }
 }
 
-def devicesPage() {
+def devicesPage(params) {
     dynamicPage(name: "devicesPage", title: "Devices Exposed to the API", nextPage: "mainPage") {
         section() {
             paragraph("The app can only use devices you authorize below. By default every " +
@@ -213,7 +220,7 @@ def devicesPage() {
     }
 }
 
-def exposePage() {
+def exposePage(params) {
     ensureActivityCache()
     if (state.exposureMigrated && !state.exposureSeeded) {
         // Visitor of the pre-1.5.2 picker: preserve whatever they selected (possibly nothing).
@@ -252,7 +259,7 @@ def exposePage() {
     }
 }
 
-def speakerPage() {
+def speakerPage(params) {
     state.speakerMigrated = true
     dynamicPage(name: "speakerPage", title: "Choose Speakers", nextPage: "devicesPage") {
         section("Speakers") {
@@ -314,7 +321,7 @@ def speakerDeviceIds() {
     return ids
 }
 
-def healthPage() {
+def healthPage(params) {
     ensureActivityCache()
     dynamicPage(name: "healthPage", title: "Device Health", nextPage: "mainPage") {
         section("Low battery alerts") {
@@ -473,6 +480,8 @@ def rulesPage(params) {
         if (params.deleteId == state.editingRuleId) state.editingRuleId = null
         state.rules = getRules().findAll { it.id != params.deleteId }
         if (state.ruleState) state.ruleState.remove(params.deleteId)
+        state.remove("schedActions_${params.deleteId}")
+        state.remove("delSeen_${params.deleteId}")
         // drop the rule's orphaned settings
         settings.keySet().findAll { it.startsWith("r_${params.deleteId}_") }.each { k ->
             try { app.removeSetting(k) } catch (e) { /* older platforms: leave it, harmless */ }
@@ -480,6 +489,7 @@ def rulesPage(params) {
         initialize()
     } else if (state.editingRuleId) {
         syncRuleFromSettings(state.editingRuleId)
+        state.editingRuleId = null
         initialize()
     }
     def rules = getRules()
@@ -507,20 +517,75 @@ def rulesPage(params) {
     }
 }
 
+def museActionsPage(params) {
+    def actions = museSideActions()
+    dynamicPage(name: "museActionsPage", title: "Muse Automations", nextPage: "mainPage") {
+        section() {
+            paragraph("These automations run on the assistant side (not on this hub) — " +
+                "schedules and tasks your assistant manages for you. They are listed here " +
+                "so you can see everything acting on your home in one place. " +
+                "To add, change, or remove one, ask your assistant in chat.")
+        }
+        section("Assistant-side automations") {
+            if (!actions) {
+                paragraph("None registered.")
+            }
+            actions.each { a ->
+                def lines = ["<b>${a.title ?: 'Untitled'}</b>"]
+                def trig = a.trigger ?: a.schedule
+                if (trig) lines << "Trigger: ${trig}"
+                if (a.actions) lines << "Actions: ${a.actions}"
+                if (a.restrictions) lines << "Restrictions: ${a.restrictions}"
+                if (a.detail && !a.actions) lines << "<span style='font-size:85%'>${a.detail}</span>"
+                paragraph(lines.join("<br>"))
+            }
+        }
+    }
+}
+
+def museSideActions() {
+    return (state.museSideActions instanceof List ? state.museSideActions : [])
+}
+
 def rulePage(params) {
-    def rid = params?.ruleId ?: state.editingRuleId
+    def rid = params?.ruleId
+    if (!rid || rid == "new") rid = state.editingRuleId
     if (!rid || rid == "new") rid = "r${now()}"
     state.editingRuleId = rid
     hydrateRuleEditor(rid) // show real values for API-created rules
     def p = "r_${rid}_"
     def st = ruleStateFor(rid)
-    dynamicPage(name: "rulePage", title: "Alert Rule", nextPage: "rulesPage") {
+    // action-list builder bookkeeping (schedule rules)
+    def actsKey = "schedActions_${rid}"
+    if (params?.addAction) editingActionsAdd(rid, p)
+    if (params?.delActionIdx != null) {
+        // delete links carry a one-time token: if the page re-renders with
+        // stale params, the token is already spent and the delete won't repeat
+        def tok = params.delToken?.toString()
+        def seenKey = "delSeen_${rid}"
+        def seen = state[seenKey] instanceof List ? state[seenKey] : []
+        if (tok && !(tok in seen)) {
+            editingActionsDelete(rid, params.delActionIdx as int)
+            state[seenKey] = (seen + [tok]).takeRight(20)
+        }
+    }
+    def isSched = (settings["${p}trigType"] ?: "device") == "schedule"
+    dynamicPage(name: "rulePage", title: isSched ? "Scheduled Actions" : "Alert Rule", nextPage: "rulesPage") {
         section("Rule") {
             input "${p}enabled", "bool", title: "Enabled", defaultValue: true
             input "${p}name", "text", title: "Rule name", required: true,
                 description: "e.g. Garage door left open"
         }
-        section("Trigger — the device state to watch") {
+        section("Trigger") {
+            input "${p}trigType", "enum", title: "Trigger type", required: true,
+                defaultValue: "device", submitOnChange: true,
+                options: ["device": "📟 Device state", "schedule": "🕒 Day/time schedule"]
+            if (isSched) {
+                input "${p}schedDays", "enum", title: "Days", multiple: true, required: true,
+                    options: scheduleDayOptions()
+                input "${p}schedTime", "time", title: "Time (hub-local)", required: true,
+                    description: "e.g. 07:20"
+            } else {
             input "${p}trigDevs", "enum", title: "Devices to watch", multiple: true, required: true,
                 options: deviceOptions(),
                 description: "Alert when ANY of these matches below"
@@ -533,15 +598,57 @@ def rulePage(params) {
                           ">=": "at least (>=)", "<=": "at most (<=)"]
             input "${p}value", "text", title: "Value to compare against", required: true,
                 description: "e.g. open, active, on, locked, wet, 78"
+            }
+        }
+        if (isSched) {
+            section("Actions — run in order when the schedule fires") {
+                def acts = editingActions(rid)
+                if (!acts) {
+                    paragraph("No actions yet — add one below. With no actions, the rule announces (if a message is set).")
+                }
+                acts.eachWithIndex { a, i ->
+                    href(name: "delAct_${rid}_${i}_${now()}", page: "rulePage",
+                        params: [ruleId: rid, delActionIdx: i, delToken: "${i}_${now()}"],
+                        title: "Remove", description: describeAction(a))
+                }
+                input "${p}actType", "enum", title: "Action type", required: false,
+                    submitOnChange: true,
+                    options: ["announce": "📣 Announce (uses the message + channels below)",
+                              "command" : "🎛 Device command",
+                              "mode"    : "🏠 Set location mode",
+                              "hsm"     : "🛡 Set HSM arm state"]
+                def at = settings["${p}actType"]?.toString()
+                if (at == "command") {
+                    input "${p}actDevice", "enum", title: "Device", required: false,
+                        options: deviceOptions()
+                    input "${p}actCommand", "text", title: "Command", required: false,
+                        description: "e.g. on, off, lock, setLevel"
+                    input "${p}actArg", "text", title: "Argument (optional, single value)", required: false,
+                        description: "e.g. 80 for setLevel 80"
+                } else if (at == "mode") {
+                    input "${p}actMode", "enum", title: "Mode", required: false,
+                        options: modeOptions()
+                } else if (at == "hsm") {
+                    input "${p}actHsm", "enum", title: "Arm state", required: false,
+                        options: ["armAway": "Armed (away)", "armHome": "Armed (home)",
+                                  "armNight": "Armed (night)", "disarm": "Disarmed"]
+                }
+                if (at) {
+                    href(name: "addAct_${rid}", page: "rulePage", params: [ruleId: rid, addAction: 1],
+                        title: "Add action", description: "Append the action above to this rule")
+                }
+            }
         }
         section("Timing") {
-            input "${p}alertWhen", "enum", title: "Alert when the state…", required: true,
-                defaultValue: "staysLongerThan",
-                options: ["staysLongerThan": "…persists LONGER than the duration",
-                          "clearsSoonerThan": "…clears SOONER than the duration"]
-            input "${p}dur", "decimal", title: "Duration (minutes, 0 = announce immediately)", required: true, defaultValue: 10,
-                description: "Decimals allowed, e.g. 0.5 for 30 seconds. 0 fires the moment the condition is seen."
-            input "${p}repeat", "decimal", title: "Repeat the announcement every (minutes, 0 = once)", defaultValue: 0
+            if (!isSched) {
+                input "${p}alertWhen", "enum", title: "Alert when the state…", required: true,
+                    defaultValue: "staysLongerThan",
+                    options: ["staysLongerThan": "…persists LONGER than the duration",
+                              "clearsSoonerThan": "…clears SOONER than the duration"]
+                input "${p}dur", "decimal", title: "Duration (minutes, 0 = announce immediately)", required: true, defaultValue: 10,
+                    description: "Decimals allowed, e.g. 0.5 for 30 seconds. 0 fires the moment the condition is seen."
+                input "${p}repeat", "decimal", title: "Repeat the announcement every (minutes, 0 = once)", defaultValue: 0
+            }
             input "${p}cooldown", "number", title: "Cooldown between announcements (seconds, 0 = none)", defaultValue: 0,
                 range: "0..3600",
                 description: "After an announcement, skip further announcements for this long. Handy for doors the kids run through."
@@ -598,7 +705,7 @@ def rulePage(params) {
     }
 }
 
-def linkPage() {
+def linkPage(params) {
     ensureToken()
     dynamicPage(name: "linkPage", title: "Link with Muse", nextPage: "mainPage") {
         section("Monitoring preferences") {
@@ -664,7 +771,7 @@ def cloudBase() {
     }
 }
 
-def apiPage() {
+def apiPage(params) {
     ensureToken()
     dynamicPage(name: "apiPage", title: "API Access", nextPage: "mainPage") {
         section() {
@@ -708,6 +815,7 @@ def installed() {
 def updated() {
     log.info "Muse Bridge v${appVersion()} updated"
     if (state.editingRuleId) syncRuleFromSettings(state.editingRuleId)
+    state.editingRuleId = null
     ensureToken()
     initialize()
 }
@@ -728,6 +836,11 @@ def initialize() {
     if (rules) {
         subscribe(location, "mode", "ruleEventHandler")
         runEvery5Minutes("periodicRuleEval")
+    }
+    // Schedule-based rules: one per-minute tick checks them all.
+    unschedule("scheduledRuleTick")
+    if (rules.any { it.enabled && isScheduleRule(it) }) {
+        schedule("0 * * * * ?", "scheduledRuleTick")
     }
     // unschedule() above wiped all pending timers: drop stale "pending" flags so
     // evaluateAllRules() re-arms them cleanly instead of relying on recovery.
@@ -769,7 +882,121 @@ def ensureToken() {
 // Rule engine
 // ============================================================================
 
+/** True for day/time-triggered rules (as opposed to device-state alert rules). */
+def isScheduleRule(Map rule) { return (rule.triggerType ?: "device") == "schedule" }
+
+def scheduleDayOptions() {
+    return ["MON": "Monday", "TUE": "Tuesday", "WED": "Wednesday",
+            "THU": "Thursday", "FRI": "Friday", "SAT": "Saturday", "SUN": "Sunday"]
+}
+
+/** Accepts "WED", "Wed", "Wednesday" (any case) → "WED"; null when unknown. */
+def normalizeDayName(String d) {
+    def m = ["MON": "MON", "MONDAY": "MON", "TUE": "TUE", "TUESDAY": "TUE",
+             "WED": "WED", "WEDNESDAY": "WED", "THU": "THU", "THURSDAY": "THU",
+             "FRI": "FRI", "FRIDAY": "FRI", "SAT": "SAT", "SATURDAY": "SAT",
+             "SUN": "SUN", "SUNDAY": "SUN"]
+    return m[d?.toString()?.trim()?.toUpperCase()]
+}
+
+/** A Hubitat `time` input setting (Date) → "HH:mm" in hub-local time. */
+def timeSettingToHHmm(v) {
+    if (!v) return null
+    try {
+        def d = v instanceof Date ? v : Date.parse("yyyy-MM-dd'T'HH:mm:ss", v.toString())
+        return d.format("HH:mm", location?.timeZone)
+    } catch (e) {
+        return v.toString()
+    }
+}
+
+/**
+ * Runs every minute while at least one schedule rule is enabled. Fires each
+ * rule whose day + time match right now (hub-local), once per minute, when
+ * its conditions hold. A hub reboot or a missed minute simply skips — the
+ * lastScheduleFire guard prevents double-firing, never back-fills.
+ */
+def scheduledRuleTick() {
+    def tz = location?.timeZone ?: TimeZone.getDefault()
+    def now = new Date()
+    def day = now.format("EEE", tz).toUpperCase()
+    def hm = now.format("HH:mm", tz)
+    def fireKey = now.format("yyyy-MM-dd", tz) + " " + hm
+    getRules().findAll { it.enabled && isScheduleRule(it) }.each { rule ->
+        if (!(day in (rule.scheduleDays ?: []))) return
+        if (rule.scheduleTime != hm) return
+        if (!conditionsTrue(rule)) {
+            logDebug("scheduled rule '${rule.name}': conditions not met, skipping")
+            return
+        }
+        def st = ruleStateFor(rule.id)
+        if (st.lastScheduleFire == fireKey) return // already fired this minute
+        if (inCooldown(rule, st)) {
+            logDebug("scheduled rule '${rule.name}': in cooldown, skipping")
+            return
+        }
+        def fired = []
+        (rule.actions ?: [[type: "announce"]]).each { action ->
+            try {
+                if (executeRuleAction(rule, action, st)) fired << describeAction(action)
+            } catch (e) {
+                log.warn "Muse Bridge: scheduled rule '${rule.name}' action failed: ${e.message}"
+            }
+        }
+        st.lastScheduleFire = fireKey
+        st.lastBreach = now()
+        if (fired) st.lastAction = [time: now(), text: fired.join("; ")]
+        saveRuleState(rule.id, st)
+        log.info "Muse Bridge: scheduled rule '${rule.name}' fired (${fired.size()} action${fired.size() == 1 ? '' : 's'})"
+    }
+}
+
+/** Runs one action of a schedule rule. Returns a short human description. */
+def executeRuleAction(Map rule, Map action, Map st) {
+    def type = action.type?.toString()
+    switch (type) {
+        case "announce":
+            // cooldown-aware; stamps lastAlert on success
+            if (announce(rule, st, "scheduled")) return "announced: ${rule.message ?: rule.name}"
+            return null // in cooldown — not a failure
+        case "command":
+            def d = getDeviceById(action.deviceId?.toString())
+            if (!d) throw new Exception("unknown device ${action.deviceId}")
+            def cmd = action.command?.toString()
+            if (!cmd || !d.hasCommand(cmd)) throw new Exception("device '${d.displayName}' has no command '${cmd}'")
+            def args = (action.args instanceof List ? action.args : []).collect { coerceArg(it) }
+            log.info "Muse Bridge: scheduled rule '${rule.name}': ${d.displayName}.${cmd}(${args})"
+            d."$cmd"(*args)
+            return "${d.displayName}: ${cmd}"
+        case "mode":
+            def mode = action.mode?.toString()
+            if (!(mode in location.modes*.name)) throw new Exception("unknown mode '${mode}'")
+            log.info "Muse Bridge: scheduled rule '${rule.name}': setting mode to ${mode}"
+            setLocationMode(mode)
+            return "mode → ${mode}"
+        case "hsm":
+            def arm = action.arm?.toString()
+            if (!(arm in ["armAway", "armHome", "armNight", "disarm"])) throw new Exception("bad arm value '${arm}'")
+            log.info "Muse Bridge: scheduled rule '${rule.name}': setting HSM to ${arm}"
+            sendLocationEvent(name: "hsmSetArm", value: arm)
+            return "HSM → ${arm}"
+        default:
+            throw new Exception("unknown action type '${type}'")
+    }
+}
+
+def describeAction(Map action) {
+    switch (action.type?.toString()) {
+        case "announce": return "announce"
+        case "command": return "command ${action.command} on device ${action.deviceId}"
+        case "mode": return "set mode ${action.mode}"
+        case "hsm": return "set HSM ${action.arm}"
+        default: return "action ${action.type}"
+    }
+}
+
 def subscribeRule(rule) {
+    if (isScheduleRule(rule)) return // schedule rules are driven by the per-minute tick
     if (!rule.attribute) {
         log.warn "Muse Bridge: rule '${rule.name}' has no attribute, skipping subscriptions"
         return
@@ -831,7 +1058,7 @@ def periodicRuleEval() {
 
 def evaluateAllRules(String reason) {
     getRules().each { rule ->
-        if (rule.enabled) evaluateRule(rule, reason)
+        if (rule.enabled && !isScheduleRule(rule)) evaluateRule(rule, reason)
     }
 }
 
@@ -898,7 +1125,7 @@ def evaluateRule(rule, String reason) {
 
 def ruleCheck(data) {
     def rule = getRule(data?.ruleId as String)
-    if (!rule || !rule.enabled) return
+    if (!rule || !rule.enabled || isScheduleRule(rule)) return
     def st = ruleStateFor(rule.id)
     if (!st.pending) return // superseded — condition already cleared
     if (triggerConditionTrue(rule) && conditionsTrue(rule)) {
@@ -920,7 +1147,7 @@ def ruleCheck(data) {
 
 def ruleRepeat(data) {
     def rule = getRule(data?.ruleId as String)
-    if (!rule || !rule.enabled) return
+    if (!rule || !rule.enabled || isScheduleRule(rule)) return
     def st = ruleStateFor(rule.id)
     if (st.breached && triggerConditionTrue(rule) && conditionsTrue(rule)) {
         fireAlert(rule, "still active")
@@ -1282,6 +1509,19 @@ def hydrateRuleEditor(String rid) {
     }
     put("${p}enabled", "bool", rule.enabled != false)
     put("${p}name", "text", rule.name?.toString())
+    put("${p}trigType", "enum", rule.triggerType?.toString() ?: "device")
+    put("${p}schedDays", "enum", (rule.scheduleDays ?: []).collect { it.toString() })
+    // schedTime is a `time` input (Date); seed it via today's date + the HH:mm
+    if (rule.scheduleTime && settings["${p}schedTime"] == null) {
+        try {
+            def parts = rule.scheduleTime.toString().split(":")
+            def cal = Calendar.getInstance()
+            cal.set(Calendar.HOUR_OF_DAY, parts[0] as int)
+            cal.set(Calendar.MINUTE, parts[1] as int)
+            cal.set(Calendar.SECOND, 0)
+            app.updateSetting("${p}schedTime", [type: "time", value: cal.getTime()])
+        } catch (e) { logDebug("hydrateRuleEditor: could not set ${p}schedTime: ${e.message}") }
+    }
     put("${p}trigDevs", "enum", (rule.triggerDevices ?: []).collect { it.toString() })
     put("${p}attr", "enum", rule.attribute?.toString())
     put("${p}op", "enum", rule.operator?.toString() ?: "=")
@@ -1307,6 +1547,59 @@ def hydrateRuleEditor(String rid) {
     logDebug("hydrateRuleEditor: populated editor for rule '${rule.name}'")
 }
 
+/**
+ * Working list of a schedule rule's actions while the editor is open.
+ * Stored in state (not settings) because actions are structured data.
+ * Seeded from the stored rule on first open; saved into the rule by
+ * syncRuleFromSettings.
+ */
+def editingActions(String rid) {
+    def key = "schedActions_${rid}"
+    if (state[key] == null) {
+        def rule = getRule(rid)
+        state[key] = (rule?.actions instanceof List ? rule.actions : []).collect { new LinkedHashMap(it) }
+    }
+    return state[key] ?: []
+}
+
+def editingActionsAdd(String rid, String p) {
+    def type = settings["${p}actType"]?.toString()
+    if (!type) return
+    def action = [type: type]
+    if (type == "command") {
+        action.deviceId = settings["${p}actDevice"]?.toString()
+        action.command = settings["${p}actCommand"]?.toString()?.trim()
+        def arg = settings["${p}actArg"]?.toString()?.trim()
+        action.args = arg ? [arg] : []
+        if (!action.deviceId || !action.command) {
+            log.warn "Muse Bridge: command action needs a device and a command — not added"
+            return
+        }
+    } else if (type == "mode") {
+        action.mode = settings["${p}actMode"]?.toString()
+        if (!action.mode) { log.warn "Muse Bridge: mode action needs a mode — not added"; return }
+    } else if (type == "hsm") {
+        action.arm = settings["${p}actHsm"]?.toString()
+        if (!action.arm) { log.warn "Muse Bridge: HSM action needs an arm state — not added"; return }
+    }
+    def acts = editingActions(rid)
+    acts << action
+    state["schedActions_${rid}"] = acts
+    // clear the builder inputs for the next action
+    ["actType", "actDevice", "actCommand", "actArg", "actMode", "actHsm"].each { k ->
+        try { app.removeSetting("${p}${k}") } catch (e) {}
+    }
+    logDebug("added ${type} action to rule ${rid}")
+}
+
+def editingActionsDelete(String rid, int idx) {
+    def acts = editingActions(rid)
+    if (idx >= 0 && idx < acts.size()) {
+        acts.remove(idx)
+        state["schedActions_${rid}"] = acts
+    }
+}
+
 /** Copy the rule editor's settings into state.rules (single source of truth). */
 def syncRuleFromSettings(String rid) {
     if (!rid) return
@@ -1317,6 +1610,10 @@ def syncRuleFromSettings(String rid) {
         id             : rid,
         name           : name,
         enabled        : settings["${p}enabled"] != false,
+        triggerType    : settings["${p}trigType"]?.toString() ?: "device",
+        scheduleDays   : (settings["${p}schedDays"] ?: []).collect { it.toString() },
+        scheduleTime   : timeSettingToHHmm(settings["${p}schedTime"]),
+        actions        : (state["schedActions_${rid}"] instanceof List ? state["schedActions_${rid}"] : []).collect { new LinkedHashMap(it) },
         triggerDevices : (settings["${p}trigDevs"] ?: []).collect { it.toString() },
         attribute      : settings["${p}attr"]?.toString(),
         operator       : settings["${p}op"]?.toString() ?: "=",
@@ -1341,6 +1638,7 @@ def syncRuleFromSettings(String rid) {
         volume         : settings["${p}volume"] == null ? null : clampVolume(settings["${p}volume"] as BigDecimal),
         updatedAt      : now()
     ]
+    rule.sensitive = ruleHasSensitiveActions(rule)
     def rules = getRules()
     def existing = rules.find { it.id == rid }
     if (existing) {
@@ -1355,23 +1653,29 @@ def syncRuleFromSettings(String rid) {
 }
 
 def ruleDescription(rule, st) {
+    def cd = (rule.cooldownSec != null ? rule.cooldownSec : 0) as BigDecimal
+    def cdTxt = cd > 0 ? " (cooldown ${cd} s)" : ""
+    def stateTxt = st.breached ? " — ⚠ BREACHED" : st.pending ? " — ⏳ pending" : ""
+    if (isScheduleRule(rule)) {
+        def days = (rule.scheduleDays ?: []).collect { scheduleDayOptions()[it] ?: it }.join(", ")
+        def n = (rule.actions ?: []).size()
+        def lock = rule.sensitive == true ? " 🔒" : ""
+        return "Every ${days} at ${rule.scheduleTime} → ${n} action${n == 1 ? '' : 's'}${cdTxt}${lock}${stateTxt}"
+    }
     def when = rule.alertWhen == "clearsSoonerThan" ? "clears sooner than" : "stays longer than"
     def durMin = (rule.durationMin != null ? rule.durationMin : 10) as BigDecimal
     def s = "${rule.attribute} ${rule.operator} ${rule.value} — "
     s += durMin <= 0 ? "alerts immediately" : "alerts if it ${when} ${rule.durationMin} min"
-    def cd = (rule.cooldownSec != null ? rule.cooldownSec : 0) as BigDecimal
-    if (cd > 0) s += " (cooldown ${cd} s)"
-    if (st.breached) s += " — ⚠ BREACHED"
-    else if (st.pending) s += " — ⏳ pending"
-    return s
+    return s + cdTxt + stateTxt
 }
 
 def ruleStatusText(String rid, Map st) {
     def rule = getRule(rid)
     if (!rule) return "New rule — fill in the sections above, then go back to save it."
     def last = st.lastBreach ? new Date(st.lastBreach as long).format("yyyy-MM-dd HH:mm") : "never"
+    def sens = rule.sensitive == true ? "\n🔒 Contains security-sensitive actions" : ""
     return "State: ${st.breached ? '⚠ BREACHED' : st.pending ? '⏳ pending confirmation' : 'ok — watching'}\n" +
-        "Last alert: ${last}"
+        "Last alert: ${last}${sens}"
 }
 
 // ============================================================================
@@ -1613,14 +1917,47 @@ def apiGetRule() {
     renderJson(ruleSummary(rule))
 }
 
+/**
+ * True when any of the rule's actions is security-sensitive: a sensitive
+ * device command (unlock, open, siren, ...), a mode change, or an HSM change.
+ */
+def ruleHasSensitiveActions(Map rule) {
+    return (rule.actions instanceof List) && rule.actions.any { a ->
+        def t = a.type?.toString()
+        if (t == "mode" || t == "hsm") return true
+        if (t == "command") {
+            def d = getDeviceById(a.deviceId?.toString())
+            return d != null && isSensitiveCommand(d, a.command?.toString())
+        }
+        return false
+    }
+}
+
+/**
+ * Gate for API writes that would leave a rule holding sensitive actions.
+ * The passcode is verified once, here, from the request — it is never stored.
+ * Verify-and-forget: rotating the passcode later does NOT retract the rule;
+ * deleting the rule is the off-switch. The rule is flagged `sensitive` so it
+ * stays visible/auditable in the app and API.
+ * Returns true when the write may proceed (renders the error otherwise).
+ */
+def requirePasscodeForSensitiveRule(Map rule) {
+    if (!ruleHasSensitiveActions(rule)) return true
+    def pc = checkPasscode()
+    if (!pc.ok) { renderJson([error: pc.error], 403); return false }
+    rule.sensitive = true
+    return true
+}
+
 def apiCreateRule() {
     if (!requireAuth()) return
     def body = request.JSON ?: [:]
     def (rule, error) = buildRuleFromApi("r${now()}", body)
     if (error) { renderJson([error: error], 400); return }
+    if (!requirePasscodeForSensitiveRule(rule)) return
     state.rules = getRules() + [rule]
     initialize()
-    log.info "Muse Bridge API: created rule '${rule.name}'"
+    log.info "Muse Bridge API: created rule '${rule.name}'${rule.sensitive ? ' (sensitive actions)' : ''}"
     renderJson(ruleSummary(rule), 201)
 }
 
@@ -1633,6 +1970,7 @@ def apiUpdateRule() {
     def merged = existing + body
     def (rule, error) = buildRuleFromApi(existing.id, merged)
     if (error) { renderJson([error: error], 400); return }
+    if (!requirePasscodeForSensitiveRule(rule)) return
     rule.createdAt = existing.createdAt
     def rules = getRules()
     rules[rules.indexOf(existing)] = rule
@@ -1665,6 +2003,11 @@ def apiDisableRule() {
 def setRuleEnabled(String id, boolean enabled) {
     def rule = getRule(id)
     if (!rule) { renderJson([error: "rule not found: ${id}"], 404); return }
+    if (enabled && (rule.sensitive == true || ruleHasSensitiveActions(rule))) {
+        // arming a sensitive rule is the same risk as creating one
+        def pc = checkPasscode()
+        if (!pc.ok) { renderJson([error: pc.error], 403); return }
+    }
     rule.enabled = enabled
     def rules = getRules()
     rules[rules.indexOf(getRule(id))] = rule
@@ -1685,20 +2028,75 @@ def apiTestRule() {
     renderJson([ok: true, id: rule.id, text: msg])
 }
 
+/** Assistant-side automations visible in the app (informational only). */
+def apiListSideActions() {
+    if (!requireAuth()) return
+    renderJson([actions: museSideActions()])
+}
+
+def apiSetSideActions() {
+    if (!requireAuth()) return
+    def body = request.JSON ?: [:]
+    def list = body.actions instanceof List ? body.actions : null
+    if (list == null) { renderJson([error: "'actions' must be a list"], 400); return }
+    state.museSideActions = list.collect { a ->
+        [id          : a.id?.toString() ?: "a${now()}",
+         title       : a.title?.toString()?.trim() ?: "Untitled",
+         schedule    : a.schedule?.toString(),
+         trigger     : a.trigger?.toString() ?: a.schedule?.toString(),
+         actions     : a.actions?.toString(),
+         restrictions: a.restrictions?.toString(),
+         detail      : a.detail?.toString()]
+    }
+    renderJson([ok: true, count: state.museSideActions.size()])
+}
+
 /** Validate + normalize a rule map coming from the API. Returns [rule, error]. */
 def buildRuleFromApi(String rid, Map body) {
     def name = body.name?.toString()?.trim()
     if (!name) return [null, "missing 'name'"]
-    def trigIds = (body.triggerDevices instanceof List ? body.triggerDevices : [])*.toString()
-    if (!trigIds) return [null, "'triggerDevices' must be a non-empty list of device ids"]
-    def unknown = trigIds.findAll { !getDeviceById(it) }
-    if (unknown) return [null, "unknown device ids: ${unknown}"]
-    def attribute = body.attribute?.toString()
-    if (!attribute) return [null, "missing 'attribute'"]
-    def operator = (body.operator ?: "=").toString()
-    if (!(operator in ["=", "!=", ">", "<", ">=", "<="])) return [null, "bad 'operator': ${operator}"]
-    def alertWhen = (body.alertWhen ?: "staysLongerThan").toString()
-    if (!(alertWhen in ["staysLongerThan", "clearsSoonerThan"])) return [null, "bad 'alertWhen': ${alertWhen}"]
+    def triggerType = (body.triggerType ?: "device").toString()
+    if (!(triggerType in ["device", "schedule"])) return [null, "bad 'triggerType': ${triggerType} (use device, schedule)"]
+    def schedDays = []
+    def schedTime = null
+    def actions = []
+    if (triggerType == "schedule") {
+        schedDays = (body.scheduleDays instanceof List ? body.scheduleDays : [])*.toString().collect { normalizeDayName(it) }
+        if (schedDays.any { it == null }) return [null, "bad 'scheduleDays': ${body.scheduleDays} (use MON..SUN or full names)"]
+        if (!schedDays) return [null, "'scheduleDays' must be a non-empty list for schedule rules"]
+        schedTime = body.scheduleTime?.toString()
+        if (!(schedTime ==~ /^([01]\d|2[0-3]):[0-5]\d$/)) return [null, "bad 'scheduleTime': ${schedTime} (use HH:mm, 24h)"]
+        def rawActions = body.actions instanceof List ? body.actions : [[type: "announce"]]
+        for (a in rawActions) {
+            def (action, err) = validateActionFromApi(a)
+            if (err) return [null, err]
+            actions << action
+        }
+    } else {
+        if (body.actions) return [null, "'actions' are only supported on schedule-triggered rules"]
+    }
+    def trigIds = []
+    def attribute = null
+    def operator = "="
+    def value = null
+    def alertWhen = "staysLongerThan"
+    def durationMin = 10
+    def repeatMin = 0
+    if (triggerType == "device") {
+        trigIds = (body.triggerDevices instanceof List ? body.triggerDevices : [])*.toString()
+        if (!trigIds) return [null, "'triggerDevices' must be a non-empty list of device ids"]
+        def unknown = trigIds.findAll { !getDeviceById(it) }
+        if (unknown) return [null, "unknown device ids: ${unknown}"]
+        attribute = body.attribute?.toString()
+        if (!attribute) return [null, "missing 'attribute'"]
+        operator = (body.operator ?: "=").toString()
+        if (!(operator in ["=", "!=", ">", "<", ">=", "<="])) return [null, "bad 'operator': ${operator}"]
+        value = body.value?.toString()
+        alertWhen = (body.alertWhen ?: "staysLongerThan").toString()
+        if (!(alertWhen in ["staysLongerThan", "clearsSoonerThan"])) return [null, "bad 'alertWhen': ${alertWhen}"]
+        durationMin = (body.durationMin != null ? body.durationMin : 10) as BigDecimal
+        repeatMin = (body.repeatMin ?: 0) as BigDecimal
+    }
     def tstatId = body.thermostatId?.toString()
     if (tstatId && !getDeviceById(tstatId)) return [null, "unknown thermostatId: ${tstatId}"]
     def modes = (body.modes instanceof List ? body.modes : [])*.toString()
@@ -1725,13 +2123,17 @@ def buildRuleFromApi(String rid, Map body) {
         id              : rid,
         name            : name,
         enabled         : body.enabled != false,
+        triggerType     : triggerType,
+        scheduleDays    : schedDays,
+        scheduleTime    : schedTime,
+        actions         : actions,
         triggerDevices  : trigIds,
         attribute       : attribute,
         operator        : operator,
-        value           : body.value?.toString(),
-        durationMin     : (body.durationMin != null ? body.durationMin : 10) as BigDecimal,
+        value           : value,
+        durationMin     : durationMin as BigDecimal,
         alertWhen       : alertWhen,
-        repeatMin       : (body.repeatMin ?: 0) as BigDecimal,
+        repeatMin       : repeatMin as BigDecimal,
         cooldownSec     : cooldownSec,
         modes           : modes,
         hsmStates       : hsmStates,
@@ -1753,12 +2155,52 @@ def buildRuleFromApi(String rid, Map body) {
     return [rule, null]
 }
 
+/**
+ * Validate one action map from the API. Returns [action, error].
+ * Sensitive actions (sensitive device commands, mode, HSM) are structurally
+ * allowed here — the endpoint gates them behind the command passcode via
+ * requirePasscodeForSensitiveRule (verified once, never stored).
+ */
+def validateActionFromApi(a) {
+    if (!(a instanceof Map)) return [null, "each 'actions' entry must be an object"]
+    def type = a.type?.toString()
+    if (!(type in ["announce", "command", "mode", "hsm"])) {
+        return [null, "bad action type '${type}' (use announce, command, mode, hsm)"]
+    }
+    if (type == "announce") return [[type: "announce"], null]
+    if (type == "command") {
+        def d = getDeviceById(a.deviceId?.toString())
+        if (!d) return [null, "action: unknown deviceId '${a.deviceId}'"]
+        def cmd = a.command?.toString()
+        if (!cmd || !d.hasCommand(cmd)) {
+            return [null, "action: device '${d.displayName}' has no command '${cmd}'"]
+        }
+        return [[type: "command", deviceId: d.id.toString(), command: cmd,
+                 args: (a.args instanceof List ? a.args : [])*.toString()], null]
+    }
+    if (type == "mode") {
+        def mode = a.mode?.toString()
+        if (!(mode in location.modes*.name)) return [null, "action: unknown mode '${mode}'"]
+        return [[type: "mode", mode: mode], null]
+    }
+    def arm = a.arm?.toString()
+    if (!(arm in ["armAway", "armHome", "armNight", "disarm"])) {
+        return [null, "action: bad arm value '${arm}'"]
+    }
+    return [[type: "hsm", arm: arm], null]
+}
+
 def ruleSummary(rule) {
     def st = ruleStateFor(rule.id)
     return [
         id            : rule.id,
         name          : rule.name,
         enabled       : rule.enabled,
+        triggerType   : rule.triggerType ?: "device",
+        scheduleDays  : rule.scheduleDays ?: [],
+        scheduleTime  : rule.scheduleTime,
+        actions       : rule.actions ?: [],
+        sensitive     : rule.sensitive == true,
         triggerDevices: triggerDeviceIds(rule).collect { id ->
             def d = getDeviceById(id)
             [id: id, name: d?.displayName]
@@ -1789,7 +2231,9 @@ def ruleSummary(rule) {
         state         : [
             pending    : st.pending,
             breached   : st.breached,
-            lastBreach : st.lastBreach ? new Date(st.lastBreach as long).format("yyyy-MM-dd'T'HH:mm:ssZ") : null
+            lastBreach : st.lastBreach ? new Date(st.lastBreach as long).format("yyyy-MM-dd'T'HH:mm:ssZ") : null,
+            lastAction : st.lastAction ? [time: new Date(st.lastAction.time as long).format("yyyy-MM-dd'T'HH:mm:ssZ"),
+                                          text: st.lastAction.text] : null
         ]
     ]
 }
@@ -1798,7 +2242,7 @@ def ruleSummary(rule) {
 // Device helpers
 // ============================================================================
 
-def appVersion() { return "1.2.1" }
+def appVersion() { return "1.3.0" }
 
 def logDebug(String msg) {
     if (settings.logDebug) log.debug "Muse Bridge: ${msg}"

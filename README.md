@@ -158,6 +158,8 @@ Base URLs are shown on the app's **API Access** page (cloud and local).
 | POST | `/rules/:id/enable` | Enable a rule |
 | POST | `/rules/:id/disable` | Disable a rule |
 | POST | `/rules/:id/test` | Speak the rule's message immediately |
+| GET | `/muse-side-actions` | Assistant-side automations listed in the app |
+| POST | `/muse-side-actions` | Replace that list: `{"actions":[{"id":"x","title":"...","schedule":"...","detail":"..."}]}` |
 
 ### Rule JSON schema (POST /rules)
 
@@ -165,6 +167,7 @@ Base URLs are shown on the app's **API Access** page (cloud and local).
 {
   "name": "Garage door left open",
   "enabled": true,
+  "triggerType": "device",
   "triggerDevices": ["12", "13"],
   "attribute": "contact",
   "operator": "=",
@@ -190,6 +193,44 @@ Base URLs are shown on the app's **API Access** page (cloud and local).
   "volume": 85
 }
 ```
+
+A rule can also be **schedule-triggered** — it fires on days/times instead of
+watching a device, and runs a list of actions:
+
+```json
+{
+  "name": "Trash Wednesday",
+  "triggerType": "schedule",
+  "scheduleDays": ["WED"],
+  "scheduleTime": "07:20",
+  "actions": [
+    {"type": "announce"},
+    {"type": "command", "deviceId": "12", "command": "off"},
+    {"type": "mode", "mode": "Night"},
+    {"type": "hsm", "arm": "armNight"}
+  ],
+  "message": "Reminder: take the trash to the road.",
+  "channels": ["speech"]
+}
+```
+
+- `triggerType`: `device` (default) or `schedule`.
+- `scheduleDays`: `MON`…`SUN` (full names like `Wednesday` also accepted).
+- `scheduleTime`: `HH:mm` in hub-local time.
+- `actions` (schedule rules): run in order when the schedule fires. Types:
+  - `announce` — sends the rule's message through its channels (default when
+    `actions` is omitted)
+  - `command` — `{"type":"command","deviceId":"12","command":"setLevel","args":["80"]}`
+  - `mode` — `{"type":"mode","mode":"Night"}`
+  - `hsm` — `{"type":"hsm","arm":"armNight"}`
+- Security note: security-sensitive actions (unlock/open/siren commands, mode
+  changes, HSM changes) can be scheduled, but the API requires the command
+  passcode in the creation request (`"passcode"` alongside the rule JSON).
+  It is verified once and never stored — verify-and-forget: rotating the
+  passcode later does **not** retract the rule; deleting the rule is the
+  off-switch. Any later API update that leaves sensitive actions in place
+  re-requires the passcode, as does re-enabling a sensitive rule. Sensitive
+  rules are flagged `sensitive: true` (🔒 in the app) so they stay auditable.
 
 - `operator`: `=`, `!=`, `>`, `<`, `>=`, `<=` (numeric when both sides are numbers,
   case-insensitive string compare otherwise).
