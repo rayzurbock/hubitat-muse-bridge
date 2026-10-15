@@ -202,7 +202,7 @@ watching a device, and runs a list of actions:
   "name": "Trash Wednesday",
   "triggerType": "schedule",
   "scheduleDays": ["WED"],
-  "scheduleTime": "07:20",
+  "scheduleTimes": ["07:20", "12:30", "15:30"],
   "actions": [
     {"type": "announce"},
     {"type": "command", "deviceId": "12", "command": "off"},
@@ -216,7 +216,11 @@ watching a device, and runs a list of actions:
 
 - `triggerType`: `device` (default) or `schedule`.
 - `scheduleDays`: `MON`…`SUN` (full names like `Wednesday` also accepted).
-- `scheduleTime`: `HH:mm` in hub-local time.
+- `scheduleTime`: `HH:mm` in hub-local time (first/only time; kept for backward
+  compatibility).
+- `scheduleTimes`: optional list of `HH:mm` — the rule fires at **each** time, so one
+  rule can cover e.g. `["07:20", "12:30", "15:30"]`. When present, the first entry
+  is also stored as `scheduleTime`.
 - `actions` (schedule rules): run in order when the schedule fires. Types:
   - `announce` — sends the rule's message through its channels (default when
     `actions` is omitted)

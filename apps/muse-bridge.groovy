@@ -547,6 +547,9 @@ def museSideActions() {
     return (state.museSideActions instanceof List ? state.museSideActions : [])
 }
 
+/** Input title with " (optional)" appended when the field isn't required. */
+def optT(String title, boolean required) { return required ? title : "${title} (optional)" }
+
 def rulePage(params) {
     def rid = params?.ruleId
     if (!rid || rid == "new") rid = state.editingRuleId
@@ -585,6 +588,8 @@ def rulePage(params) {
                     options: scheduleDayOptions()
                 input "${p}schedTime", "time", title: "Time (hub-local)", required: true,
                     description: "e.g. 07:20"
+                input "${p}schedTimesExtra", "text", title: optT("Additional times", false),
+                    description: "More times, comma-separated HH:mm (24h) — e.g. 12:30, 15:30"
             } else {
             input "${p}trigDevs", "enum", title: "Devices to watch", multiple: true, required: true,
                 options: deviceOptions(),
@@ -611,7 +616,7 @@ def rulePage(params) {
                         params: [ruleId: rid, delActionIdx: i, delToken: "${i}_${now()}"],
                         title: "Remove", description: describeAction(a))
                 }
-                input "${p}actType", "enum", title: "Action type", required: false,
+                input "${p}actType", "enum", title: optT("Action type", false), required: false,
                     submitOnChange: true,
                     options: ["announce": "📣 Announce (uses the message + channels below)",
                               "command" : "🎛 Device command",
@@ -619,17 +624,17 @@ def rulePage(params) {
                               "hsm"     : "🛡 Set HSM arm state"]
                 def at = settings["${p}actType"]?.toString()
                 if (at == "command") {
-                    input "${p}actDevice", "enum", title: "Device", required: false,
+                    input "${p}actDevice", "enum", title: "Device", required: true,
                         options: deviceOptions()
-                    input "${p}actCommand", "text", title: "Command", required: false,
+                    input "${p}actCommand", "text", title: "Command", required: true,
                         description: "e.g. on, off, lock, setLevel"
-                    input "${p}actArg", "text", title: "Argument (optional, single value)", required: false,
+                    input "${p}actArg", "text", title: optT("Argument (single value)", false), required: false,
                         description: "e.g. 80 for setLevel 80"
                 } else if (at == "mode") {
-                    input "${p}actMode", "enum", title: "Mode", required: false,
+                    input "${p}actMode", "enum", title: "Mode", required: true,
                         options: modeOptions()
                 } else if (at == "hsm") {
-                    input "${p}actHsm", "enum", title: "Arm state", required: false,
+                    input "${p}actHsm", "enum", title: "Arm state", required: true,
                         options: ["armAway": "Armed (away)", "armHome": "Armed (home)",
                                   "armNight": "Armed (night)", "disarm": "Disarmed"]
                 }
@@ -647,28 +652,28 @@ def rulePage(params) {
                               "clearsSoonerThan": "…clears SOONER than the duration"]
                 input "${p}dur", "decimal", title: "Duration (minutes, 0 = announce immediately)", required: true, defaultValue: 10,
                     description: "Decimals allowed, e.g. 0.5 for 30 seconds. 0 fires the moment the condition is seen."
-                input "${p}repeat", "decimal", title: "Repeat the announcement every (minutes, 0 = once)", defaultValue: 0
+                input "${p}repeat", "decimal", title: optT("Repeat the announcement every (minutes, 0 = once)", false), defaultValue: 0
             }
-            input "${p}cooldown", "number", title: "Cooldown between announcements (seconds, 0 = none)", defaultValue: 0,
+            input "${p}cooldown", "number", title: optT("Cooldown between announcements (seconds, 0 = none)", false), defaultValue: 0,
                 range: "0..3600",
                 description: "After an announcement, skip further announcements for this long. Handy for doors the kids run through."
         }
         section("Conditions — the rule only arms when ALL of these hold (blank = always)") {
-            input "${p}modes", "enum", title: "Location modes", multiple: true, required: false,
+            input "${p}modes", "enum", title: optT("Location modes", false), multiple: true, required: false,
                 options: modeOptions()
-            input "${p}hsmStates", "enum", title: "Security monitor (HSM) is…", multiple: true, required: false,
+            input "${p}hsmStates", "enum", title: optT("Security monitor (HSM) is…", false), multiple: true, required: false,
                 options: ["armedAway": "Armed (away)", "armedHome": "Armed (home)",
                           "armedNight": "Armed (night)", "disarmed": "Disarmed"],
                 description: "Requires Hubitat Safety Monitor; blank = any state"
-            input "${p}tstat", "enum", title: "Thermostat", required: false,
+            input "${p}tstat", "enum", title: optT("Thermostat", false), required: false,
                 options: thermostatOptions(),
                 description: "e.g. only alert about open windows while the A/C runs"
-            input "${p}tstatStates", "enum", title: "Thermostat is…", multiple: true, required: false,
+            input "${p}tstatStates", "enum", title: optT("Thermostat is…", false), multiple: true, required: false,
                 options: ["heating": "heating", "cooling": "cooling", "idle": "idle",
                           "fan only": "fan only", "pending heat": "pending heat", "pending cool": "pending cool"]
-            input "${p}timeFrom", "time", title: "Only between (from)", required: false
-            input "${p}timeTo", "time", title: "…and (to)", required: false
-            input "${p}days", "enum", title: "Days of the week", multiple: true, required: false,
+            input "${p}timeFrom", "time", title: optT("Only between (from)", false), required: false
+            input "${p}timeTo", "time", title: optT("…and (to)", false), required: false
+            input "${p}days", "enum", title: optT("Days of the week", false), multiple: true, required: false,
                 options: ["Monday": "Monday", "Tuesday": "Tuesday", "Wednesday": "Wednesday",
                           "Thursday": "Thursday", "Friday": "Friday", "Saturday": "Saturday", "Sunday": "Sunday"]
         }
@@ -676,21 +681,22 @@ def rulePage(params) {
             paragraph("Choose how this rule announces. Text alerts (push) can target " +
                 "specific phones; spoken alerts use the house speakers; Muse chat " +
                 "messages arrive via the assistant's polling.")
-            input "${p}msg", "text", title: "Message (blank = automatic)", required: false,
-                description: "Tokens: %device% %attribute% %value% %rule%. Used for every channel."
+            input "${p}msg", "text", title: optT("Message", false), required: false,
+                description: "Blank = automatic. Tokens: %device% %attribute% %value% %rule%. Used for every channel."
             input "${p}channels", "enum", title: "Send alerts via", multiple: true, required: true,
                 defaultValue: ["speech"],
                 options: ["speech": "🔊 Spoken on house speakers",
                           "push"  : "📱 Push to phones (Hubitat app)",
                           "muse"  : "💬 Message in Muse chat"]
-            input "${p}speech", "enum", title: "Speak on (blank = all speech devices)",
-                multiple: true, required: false, options: speechOptions()
-            input "${p}pushDevs", "enum", title: "Push to (blank = all phones)",
+            input "${p}speech", "enum", title: optT("Speak on", false),
+                multiple: true, required: false, options: speechOptions(),
+                description: "Blank = all speech devices"
+            input "${p}pushDevs", "enum", title: optT("Push to", false),
                 multiple: true, required: false, options: pushOptions(),
-                description: "Each phone is a separate device — pick who gets the text"
-            input "${p}volume", "number", title: "Volume for this rule's announcements (0-100, blank = app default)",
+                description: "Blank = all phones. Each phone is a separate device — pick who gets the text"
+            input "${p}volume", "number", title: optT("Volume for this rule's announcements", false),
                 required: false, range: "0..100",
-                description: "Handy for making urgent rules louder than the rest"
+                description: "0-100, blank = app default. Handy for making urgent rules louder than the rest"
             input "${p}notifyClear", "bool", title: "Also notify when the condition clears", defaultValue: false
             input "${p}urgent", "bool", title: "URGENT priority", defaultValue: false,
                 description: "Alerts are prefixed so they stand out on every channel"
@@ -910,6 +916,19 @@ def timeSettingToHHmm(v) {
     }
 }
 
+/** Parse "12:30, 15:30" → ["12:30", "15:30"]; invalid entries are dropped. */
+def parseExtraTimes(String text) {
+    if (!text) return []
+    return text.split(/[,\s]+/).collect { it.trim() }.findAll { it ==~ /^([01]\d|2[0-3]):[0-5]\d$/ }.unique()
+}
+
+/** All HH:mm times a schedule rule fires at (scheduleTimes wins; scheduleTime is legacy). */
+def scheduleRuleTimes(rule) {
+    def ts = rule?.scheduleTimes instanceof List ? rule.scheduleTimes : []
+    if (!ts && rule?.scheduleTime) ts = [rule.scheduleTime]
+    return ts.collect { it?.toString() }.findAll { it }.unique()
+}
+
 /**
  * Runs every minute while at least one schedule rule is enabled. Fires each
  * rule whose day + time match right now (hub-local), once per minute, when
@@ -924,7 +943,7 @@ def scheduledRuleTick() {
     def fireKey = now.format("yyyy-MM-dd", tz) + " " + hm
     getRules().findAll { it.enabled && isScheduleRule(it) }.each { rule ->
         if (!(day in (rule.scheduleDays ?: []))) return
-        if (rule.scheduleTime != hm) return
+        if (!(hm in scheduleRuleTimes(rule))) return
         if (!conditionsTrue(rule)) {
             logDebug("scheduled rule '${rule.name}': conditions not met, skipping")
             return
@@ -1511,6 +1530,11 @@ def hydrateRuleEditor(String rid) {
     put("${p}name", "text", rule.name?.toString())
     put("${p}trigType", "enum", rule.triggerType?.toString() ?: "device")
     put("${p}schedDays", "enum", (rule.scheduleDays ?: []).collect { it.toString() })
+    def hTimes = (rule.scheduleTimes instanceof List ? rule.scheduleTimes : [])
+    if (!hTimes && rule.scheduleTime) hTimes = [rule.scheduleTime?.toString()]
+    if (hTimes.size() > 1 && settings["${p}schedTimesExtra"] == null) {
+        put("${p}schedTimesExtra", "text", hTimes[1..-1].join(", "))
+    }
     // schedTime is a `time` input (Date); seed it via today's date + the HH:mm
     if (rule.scheduleTime && settings["${p}schedTime"] == null) {
         try {
@@ -1613,6 +1637,7 @@ def syncRuleFromSettings(String rid) {
         triggerType    : settings["${p}trigType"]?.toString() ?: "device",
         scheduleDays   : (settings["${p}schedDays"] ?: []).collect { it.toString() },
         scheduleTime   : timeSettingToHHmm(settings["${p}schedTime"]),
+        scheduleTimes  : ([timeSettingToHHmm(settings["${p}schedTime"])] + parseExtraTimes(settings["${p}schedTimesExtra"]?.toString())).findAll().unique(),
         actions        : (state["schedActions_${rid}"] instanceof List ? state["schedActions_${rid}"] : []).collect { new LinkedHashMap(it) },
         triggerDevices : (settings["${p}trigDevs"] ?: []).collect { it.toString() },
         attribute      : settings["${p}attr"]?.toString(),
@@ -1658,9 +1683,10 @@ def ruleDescription(rule, st) {
     def stateTxt = st.breached ? " — ⚠ BREACHED" : st.pending ? " — ⏳ pending" : ""
     if (isScheduleRule(rule)) {
         def days = (rule.scheduleDays ?: []).collect { scheduleDayOptions()[it] ?: it }.join(", ")
+        def times = scheduleRuleTimes(rule).join(", ")
         def n = (rule.actions ?: []).size()
         def lock = rule.sensitive == true ? " 🔒" : ""
-        return "Every ${days} at ${rule.scheduleTime} → ${n} action${n == 1 ? '' : 's'}${cdTxt}${lock}${stateTxt}"
+        return "Every ${days} at ${times} → ${n} action${n == 1 ? '' : 's'}${cdTxt}${lock}${stateTxt}"
     }
     def when = rule.alertWhen == "clearsSoonerThan" ? "clears sooner than" : "stays longer than"
     def durMin = (rule.durationMin != null ? rule.durationMin : 10) as BigDecimal
@@ -2059,13 +2085,23 @@ def buildRuleFromApi(String rid, Map body) {
     if (!(triggerType in ["device", "schedule"])) return [null, "bad 'triggerType': ${triggerType} (use device, schedule)"]
     def schedDays = []
     def schedTime = null
+    def schedTimes = []
     def actions = []
     if (triggerType == "schedule") {
         schedDays = (body.scheduleDays instanceof List ? body.scheduleDays : [])*.toString().collect { normalizeDayName(it) }
         if (schedDays.any { it == null }) return [null, "bad 'scheduleDays': ${body.scheduleDays} (use MON..SUN or full names)"]
         if (!schedDays) return [null, "'scheduleDays' must be a non-empty list for schedule rules"]
+        def rawTimes = (body.scheduleTimes instanceof List ? body.scheduleTimes : [])*.toString()
         schedTime = body.scheduleTime?.toString()
-        if (!(schedTime ==~ /^([01]\d|2[0-3]):[0-5]\d$/)) return [null, "bad 'scheduleTime': ${schedTime} (use HH:mm, 24h)"]
+        if (rawTimes) {
+            def bad = rawTimes.findAll { !(it ==~ /^([01]\d|2[0-3]):[0-5]\d$/) }
+            if (bad) return [null, "bad 'scheduleTimes' entries: ${bad} (use HH:mm, 24h)"]
+            schedTimes = rawTimes.unique()
+            schedTime = schedTimes[0]
+        } else {
+            if (!(schedTime ==~ /^([01]\d|2[0-3]):[0-5]\d$/)) return [null, "bad 'scheduleTime': ${schedTime} (use HH:mm, 24h)"]
+            schedTimes = [schedTime]
+        }
         def rawActions = body.actions instanceof List ? body.actions : [[type: "announce"]]
         for (a in rawActions) {
             def (action, err) = validateActionFromApi(a)
@@ -2126,6 +2162,7 @@ def buildRuleFromApi(String rid, Map body) {
         triggerType     : triggerType,
         scheduleDays    : schedDays,
         scheduleTime    : schedTime,
+        scheduleTimes   : schedTimes,
         actions         : actions,
         triggerDevices  : trigIds,
         attribute       : attribute,
@@ -2199,6 +2236,7 @@ def ruleSummary(rule) {
         triggerType   : rule.triggerType ?: "device",
         scheduleDays  : rule.scheduleDays ?: [],
         scheduleTime  : rule.scheduleTime,
+        scheduleTimes : scheduleRuleTimes(rule),
         actions       : rule.actions ?: [],
         sensitive     : rule.sensitive == true,
         triggerDevices: triggerDeviceIds(rule).collect { id ->
@@ -2242,7 +2280,7 @@ def ruleSummary(rule) {
 // Device helpers
 // ============================================================================
 
-def appVersion() { return "1.3.0" }
+def appVersion() { return "1.3.1" }
 
 def logDebug(String msg) {
     if (settings.logDebug) log.debug "Muse Bridge: ${msg}"
