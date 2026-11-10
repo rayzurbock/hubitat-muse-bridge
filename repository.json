@@ -1,1 +1,19 @@
-{"author":"Rayzurbock","gitHubUrl":"https://github.com/rayzurbock","packages":[{"category":"Integrations","description":"REST API plus spoken alert-rule engine for Muse and other integrations.","location":"https://raw.githubusercontent.com/rayzurbock/hubitat-muse-bridge/main/packageManifest.json","name":"Muse Bridge"},{"category":"Notifications","description":"Spoken and/or text announcements for mode changes, switches, motions, and more.","location":"https://raw.githubusercontent.com/rayzurbock/BigTalker3/main/packageManifest.json","name":"BigTalker3"}],"payPalUrl":"https://paypal.me/brianlowrance"}
+{
+  "author": "Rayzurbock",
+  "gitHubUrl": "https://github.com/rayzurbock",
+  "packages": [
+    {
+      "category": "Integrations",
+      "description": "REST API plus spoken alert-rule engine for Muse and other integrations.",
+      "location": "https://raw.githubusercontent.com/rayzurbock/hubitat-muse-bridge/main/packageManifest.json",
+      "name": "Muse Bridge"
+    },
+    {
+      "category": "Notifications",
+      "description": "Spoken and/or text announcements for mode changes, switches, motions, and more.",
+      "location": "https://raw.githubusercontent.com/rayzurbock/BigTalker3/main/packageManifest.json",
+      "name": "BigTalker3"
+    }
+  ],
+  "payPalUrl": "https://paypal.me/brianlowrance"
+}
